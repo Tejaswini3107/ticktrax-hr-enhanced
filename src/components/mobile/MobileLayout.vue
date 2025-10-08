@@ -59,35 +59,23 @@
     </Button>
 
     <!-- Mobile Sidebar Overlay -->
-    <!-- <div
+       <div
       v-if="sidebarOpen"
       class="fixed inset-0 z-40 bg-black/50 md:hidden"
       role="button"
       aria-label="Close menu"
       tabindex="0"
-      @click="closeSidebar"
-      @pointerdown="closeSidebar"
-      @touchstart.prevent="closeSidebar"
-    ></div> -->
-
-    <!-- Mobile Sidebar Overlay -->
-    <div
-      v-if="sidebarOpen"
-      class="fixed inset-0 z-40 bg-black/50 md:hidden"
-      role="button"
-      aria-label="Close menu"
-      tabindex="0"
-      @click="closeSidebar"
+      @click="closeSidebar('overlay')"
+      @pointerdown="closeSidebar('overlay')"
+      @touchstart.prevent="closeSidebar('overlay')"
     ></div>
-    
-    <!-- Mobile Sidebar -->
-    <aside 
-      :class="[
-        'fixed left-0 top-0 z-50 h-full w-64 bg-background border-r transform transition-transform duration-300 md:hidden',
-        sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-      ]"
-      @click.stop
+
+    <!-- Sidebar Panel -->
+    <aside
+      v-if="sidebarOpen"
       :style="asideStyle"
+      class="fixed left-0 top-0 bottom-0 z-50 w-72 bg-background md:hidden overflow-auto"
+      @click.stop
     >
       <!-- Sidebar Header -->
       <div class="p-4 border-b">
@@ -96,7 +84,7 @@
             <component :is="currentConfig.icon" class="h-6 w-6 text-primary" />
             <span class="font-semibold">{{ currentConfig.title }}</span>
           </div>
-          <Button variant="ghost" size="sm" @click="closeSidebar">
+          <Button variant="ghost" size="sm" @click="closeSidebar('header')">
             <X class="h-4 w-4" />
           </Button>
         </div>
@@ -163,7 +151,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { 
   Clock, Users, FileText, Settings, Home, Calendar, TrendingUp, 
   Shield, Bell, HelpCircle, LogOut, User, Menu, X 
@@ -236,11 +224,16 @@ const toggleSidebar = () => {
   console.debug('[MobileLayout] toggleSidebar called, sidebarOpen =', sidebarOpen.value);
 };
 
-const closeSidebar = () => {
-  // debug: log when sidebar is closed programmatically or by overlay click
+const closeSidebar = (source = 'unknown') => {
+  // debug: log when sidebar is closed and where the action originated
   sidebarOpen.value = false;
-  console.debug('[MobileLayout] closeSidebar called, sidebarOpen =', sidebarOpen.value);
+  console.debug('[MobileLayout] closeSidebar called, source =', source, 'sidebarOpen =', sidebarOpen.value);
 };
+
+onMounted(() => {
+  // Build marker — helps verify the running WebView is using this exact source version
+  console.info('[MobileLayout] mounted - buildMarker=mobile-layout-v2');
+});
 
 // Visual debug style for the aside to surface z-index/transform issues.
 const asideStyle = computed(() => {
@@ -255,7 +248,7 @@ const asideStyle = computed(() => {
 
 const handleNavigation = (viewId) => {
   emit('update:currentView', viewId);
-  closeSidebar();
+  closeSidebar('nav');
 };
 </script>
 

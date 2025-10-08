@@ -12,10 +12,10 @@
         :current-role="user.role"
         :user-name="user.name"
         :notifications="notifications"
-  :current-view="currentView"
-  @update:current-view="updateCurrentView"
+        :current-view="currentView"
+        @update:current-view="updateCurrentView"
         @logout="handleLogout"
-        @profile-click="showProfile = true"
+        @profileClick="showProfile = true"
       >
         <!-- Mobile Clock Widget for Clock View -->
         <MobileClockWidget 
@@ -100,6 +100,14 @@
           </div>
         </div>
       </MobileLayout>
+      
+  <!-- Profile Modal -->
+  <Profile 
+    v-if="showProfile" 
+    :user="userProfile || { first_name: user.name, role: user.role }" 
+    @close="handleProfileClose" 
+    @logout="handleProfileLogout" 
+  />
     </div>
 
     <!-- Desktop Layout (fallback) -->
@@ -162,6 +170,7 @@ import TeamOverview from './TeamOverview.vue';
 import EmployeeManagement from './EmployeeManagement.vue';
 import Analytics from './Analytics.vue';
 import Settings from './Settings.vue';
+import Profile from './Profile.vue';
 import DashboardLayout from '../DashboardLayout.vue';
 import LoginScreen from '../auth/LoginScreen.vue';
 import Card from '../ui/card.vue';
@@ -172,6 +181,7 @@ import authManager from '../../services/authService.js';
 const { toast } = useToast();
 
 const user = ref(null);
+const userProfile = ref(null); // raw profile object (first_name, last_name, email, role)
 const currentView = ref('dashboard');
 const notifications = ref(3);
 const showProfile = ref(false);
@@ -241,11 +251,12 @@ const setupPWA = () => {
 const checkAuthState = async () => {
   // Check if user is already authenticated
   if (authManager.isAuthenticated()) {
-    const userProfile = await authManager.getUserProfile();
-    if (userProfile) {
+    const profile = await authManager.getUserProfile();
+    if (profile) {
+      userProfile.value = profile;
       user.value = {
-        name: `${userProfile.first_name} ${userProfile.last_name}`,
-        role: userProfile.role
+        name: `${profile.first_name || profile.firstName || ''} ${profile.last_name || profile.lastName || ''}`.trim(),
+        role: profile.role || 'employee'
       };
     }
   }
@@ -267,6 +278,15 @@ const handleLogout = async () => {
     console.error('Logout error:', error);
     toast.error('Logout failed');
   }
+};
+
+const handleProfileClose = () => {
+  showProfile.value = false;
+};
+
+const handleProfileLogout = async () => {
+  await handleLogout();
+  showProfile.value = false;
 };
 
 const updateCurrentView = (view) => {
