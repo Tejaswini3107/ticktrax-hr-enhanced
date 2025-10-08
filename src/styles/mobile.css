@@ -1,0 +1,162 @@
+/* Mobile-First CSS for TickTrax */
+
+/* Reset and base styles */
+* {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+/* Allow text selection for inputs and content areas */
+input, textarea, [contenteditable] {
+  -webkit-user-select: auto;
+  -moz-user-select: auto;
+  -ms-user-select: auto;
+  user-select: auto;
+}
+
+/* Safe area handling for notched devices */
+@supports (padding: max(0px)) {
+  .safe-area-inset-top {
+    padding-top: max(0px, env(safe-area-inset-top));
+  }
+  
+  .safe-area-inset-bottom {
+    padding-bottom: max(0px, env(safe-area-inset-bottom));
+  }
+  
+  .safe-area-inset-left {
+    padding-left: max(0px, env(safe-area-inset-left));
+  }
+  
+  .safe-area-inset-right {
+    padding-right: max(0px, env(safe-area-inset-right));
+  }
+}
+
+/* Touch-friendly button sizes */
+@media (max-width: 768px) {
+  button, .button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Larger touch targets for important actions */
+  .touch-target-large {
+    min-height: 56px;
+    min-width: 56px;
+  }
+  
+  /* Prevent zoom on form inputs */
+  input[type="email"],
+  input[type="password"],
+  input[type="text"],
+  input[type="search"],
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* Mobile-specific animations */
+@media (prefers-reduced-motion: no-preference) {
+  .mobile-transition {
+    transition: transform 0.2s ease-out, opacity 0.2s ease-out;
+  }
+  
+  .mobile-transition:active {
+    transform: scale(0.98);
+  }
+}
+
+/* Dark mode optimizations */
+@media (prefers-color-scheme: dark) {
+  .mobile-optimized {
+    background-color: #000000;
+    color: #ffffff;
+  }
+}
+
+/* Landscape orientation adjustments */
+@media screen and (orientation: landscape) and (max-height: 500px) {
+  .mobile-header {
+    height: 48px;
+  }
+  
+  .mobile-bottom-nav {
+    height: 48px;
+  }
+  
+  .mobile-main {
+    padding-bottom: 48px;
+  }
+}
+
+/* High DPI display optimizations */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  .high-dpi-optimized {
+    /* Crisp rendering for high DPI */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Accessibility improvements */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Focus styles for keyboard navigation */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+/* Hide elements that shouldn't be visible on mobile */
+@media (max-width: 768px) {
+  .desktop-only {
+    display: none !important;
+  }
+}
+
+/* Show elements only on mobile */
+@media (min-width: 769px) {
+  .mobile-only {
+    display: none !important;
+  }
+}
+
+/* PWA-specific styles */
+@media (display-mode: standalone) {
+  .pwa-mode {
+    /* Styles when app is installed as PWA */
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  }
+}
+
+/* iOS-specific adjustments */
+@supports (-webkit-appearance: none) {
+  input[type="submit"],
+  input[type="button"],
+  button {
+    -webkit-appearance: none;
+    border-radius: 0;
+  }
+}
+
+/* Android-specific adjustments */
+@media screen and (-webkit-min-device-pixel-ratio: 0) {
+  .android-optimized {
+    /* Android-specific optimizations */
+  }
+}

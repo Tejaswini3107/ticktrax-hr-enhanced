@@ -1,0 +1,71 @@
+<script setup>
+import { computed } from 'vue'
+import {
+  TooltipArrow,
+  TooltipContent,
+  TooltipPortal,
+  TooltipProvider,
+  TooltipRoot,
+  TooltipTrigger,
+  useForwardPropsEmits,
+} from 'radix-vue'
+import { cn } from './utils'
+
+const props = defineProps({
+  defaultOpen: { type: Boolean, required: false },
+  open: { type: Boolean, required: false, default: undefined },
+  delayDuration: { type: Number, required: false },
+  disableClosingTrigger: { type: Boolean, required: false },
+  disableHoverableContent: { type: Boolean, required: false },
+  class: { type: String, required: false },
+  sideOffset: { type: Number, required: false, default: 4 },
+  side: { type: String, required: false },
+  align: { type: String, required: false },
+  alignOffset: { type: Number, required: false },
+  avoidCollisions: { type: Boolean, required: false },
+  collisionBoundary: { type: null, required: false },
+  collisionPadding: { type: [Number, Object], required: false },
+  arrowPadding: { type: Number, required: false },
+  sticky: { type: String, required: false },
+  hideWhenDetached: { type: Boolean, required: false },
+})
+const emits = defineEmits(['update:open'])
+
+const delegatedProps = computed(() => {
+  const { class: _, ...delegated } = props
+  return delegated
+})
+
+const forwarded = useForwardPropsEmits(delegatedProps, emits)
+</script>
+
+<template>
+  <TooltipProvider>
+    <TooltipRoot v-bind="forwarded">
+      <slot />
+    </TooltipRoot>
+  </TooltipProvider>
+</template>
+
+<script>
+export const TooltipTrigger = TooltipTrigger
+
+export const TooltipContent = {
+  components: { TooltipPortal, TooltipContent, TooltipArrow },
+  props: ['class', 'sideOffset', 'side', 'align', 'alignOffset', 'avoidCollisions', 'collisionBoundary', 'collisionPadding', 'arrowPadding', 'sticky', 'hideWhenDetached'],
+  template: `
+    <TooltipPortal>
+      <TooltipContent
+        v-bind="$props"
+        :class="cn(
+          'z-50 overflow-hidden rounded-md border bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2',
+          props.class,
+        )"
+      >
+        <slot />
+        <TooltipArrow />
+      </TooltipContent>
+    </TooltipPortal>
+  `,
+}
+</script>

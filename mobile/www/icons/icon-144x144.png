@@ -1,0 +1,7 @@
+<!-- This should be a PNG file, but creating as SVG placeholder -->
+<svg width="144" height="144" viewBox="0 0 144 144" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="144" height="144" rx="24" fill="#2563eb"/>
+  <circle cx="72" cy="72" r="48" stroke="white" stroke-width="4" fill="none"/>
+  <path d="M72 36 L72 72 L96 72" stroke="white" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="72" cy="72" r="4" fill="white"/>
+</svg>

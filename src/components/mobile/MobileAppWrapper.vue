@@ -1,0 +1,450 @@
+<template>
+  <div class="mobile-app-wrapper">
+    <!-- Mobile Layout -->
+    <div v-if="isMobile" class="mobile-view">
+      <MobileLoginScreen 
+        v-if="!user" 
+        @login="handleLogin" 
+      />
+      
+      <MobileLayout 
+        v-else
+        :current-role="user.role"
+        :user-name="user.name"
+        :notifications="notifications"
+  :current-view="currentView"
+  @update:current-view="updateCurrentView"
+        @logout="handleLogout"
+        @profile-click="showProfile = true"
+      >
+        <!-- Mobile Clock Widget for Clock View -->
+        <MobileClockWidget 
+          v-if="currentView === 'clock'"
+          :clocked-in="clockedIn"
+          :clock-in-time="clockInTime"
+          :work-time-today="workTimeToday"
+          :weekly-hours="weeklyHours"
+          :monthly-hours="monthlyHours"
+          :location-enabled="locationEnabled"
+          @clock-in="handleClockIn"
+          @clock-out="handleClockOut"
+          @show-break-dialog="showBreakDialog = true"
+          @show-timesheet="currentView = 'timesheet'"
+        />
+        
+        <!-- Other mobile views -->
+        <div v-else-if="currentView === 'dashboard'" class="mobile-dashboard">
+          <h2 class="text-2xl font-bold mb-6">Dashboard</h2>
+          <div class="grid gap-4">
+            <Card class="p-4">
+              <h3 class="font-semibold mb-2">Today's Summary</h3>
+              <div class="grid grid-cols-2 gap-4 text-center">
+                <div>
+                  <div class="text-2xl font-bold text-primary">{{ workTimeToday }}</div>
+                  <div class="text-sm text-muted-foreground">Hours Worked</div>
+                </div>
+                <div>
+                  <div class="text-2xl font-bold text-primary">{{ tasksCompleted }}</div>
+                  <div class="text-sm text-muted-foreground">Tasks Done</div>
+                </div>
+              </div>
+            </Card>
+          </div>
+        </div>
+
+        <div v-else-if="currentView === 'timesheet' || currentView === 'timeManagement'">
+          <TimeManagement />
+        </div>
+
+        <div v-else-if="currentView === 'schedule'">
+          <MySchedule />
+        </div>
+
+        <div v-else-if="currentView === 'reports'">
+          <MyReport />
+        </div>
+
+        <div v-else-if="currentView === 'help'">
+          <HelpCenter />
+        </div>
+
+        <div v-else-if="currentView === 'approvals'">
+          <Approvals />
+        </div>
+
+        <div v-else-if="currentView === 'alerts'">
+          <Alerts />
+        </div>
+
+        <div v-else-if="currentView === 'team'">
+          <TeamOverview />
+        </div>
+
+        <div v-else-if="currentView === 'employees'">
+          <EmployeeManagement />
+        </div>
+
+        <div v-else-if="currentView === 'analytics'">
+          <Analytics />
+        </div>
+
+        <div v-else-if="currentView === 'settings'">
+          <Settings />
+        </div>
+
+        <div v-else class="mobile-view-placeholder">
+          <div class="text-center py-12">
+            <h3 class="text-lg font-semibold mb-2">{{ getViewTitle(currentView) }}</h3>
+            <p class="text-muted-foreground">This view is being optimized for mobile.</p>
+            <div class="mt-4 text-xs text-muted-foreground">currentView: <strong>{{ currentView }}</strong></div>
+          </div>
+        </div>
+      </MobileLayout>
+    </div>
+
+    <!-- Desktop Layout (fallback) -->
+    <div v-else class="desktop-view">
+      <DashboardLayout
+        v-if="user"
+        :current-role="user.role"
+        :user-name="user.name"
+        :notifications="notifications"
+        :current-view="currentView"
+        @update:current-view="currentView = $event"
+        @logout="handleLogout"
+        @profile-click="showProfile = true"
+      >
+        <slot />
+      </DashboardLayout>
+      
+      <LoginScreen 
+        v-else 
+        @login="handleLogin" 
+      />
+    </div>
+
+    <!-- PWA Install Prompt -->
+    <div 
+      v-if="showInstallPrompt && deferredPrompt" 
+      class="fixed bottom-4 left-4 right-4 z-50 md:hidden"
+    >
+      <Card class="shadow-lg border-primary">
+        <CardContent class="p-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="font-medium">Install App</div>
+              <div class="text-sm text-muted-foreground">Get the full mobile experience</div>
+            </div>
+            <div class="flex gap-2">
+              <Button size="sm" @click="installPWA">Install</Button>
+              <Button size="sm" variant="ghost" @click="dismissInstallPrompt">Later</Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, computed, watch } from 'vue';
+import { useToast } from '../ui/toast/use-toast.js';
+import MobileLayout from './MobileLayout.vue';
+import MobileLoginScreen from './MobileLoginScreen.vue';
+import MobileClockWidget from './MobileClockWidget.vue';
+import TimeManagement from './TimeManagement.vue';
+import MySchedule from './MySchedule.vue';
+import MyReport from './MyReport.vue';
+import HelpCenter from './HelpCenter.vue';
+import Approvals from './Approvals.vue';
+import Alerts from './Alerts.vue';
+import TeamOverview from './TeamOverview.vue';
+import EmployeeManagement from './EmployeeManagement.vue';
+import Analytics from './Analytics.vue';
+import Settings from './Settings.vue';
+import DashboardLayout from '../DashboardLayout.vue';
+import LoginScreen from '../auth/LoginScreen.vue';
+import Card from '../ui/card.vue';
+import { CardContent } from '../ui/card-components.vue';
+import Button from '../ui/button.vue';
+import authManager from '../../services/authService.js';
+
+const { toast } = useToast();
+
+const user = ref(null);
+const currentView = ref('dashboard');
+const notifications = ref(3);
+const showProfile = ref(false);
+// Track last set to detect rapid unwanted overwrites
+const lastSet = ref({ view: currentView.value, at: Date.now() });
+
+// Mobile detection
+const isMobile = ref(false);
+
+// Clock state
+const clockedIn = ref(false);
+const clockInTime = ref('');
+const workTimeToday = ref('0:00');
+const weeklyHours = ref('35h');
+const monthlyHours = ref('142h');
+const locationEnabled = ref(true);
+const tasksCompleted = ref(12);
+
+// PWA install
+const deferredPrompt = ref(null);
+const showInstallPrompt = ref(false);
+
+onMounted(() => {
+  detectMobile();
+  setupPWA();
+  checkAuthState();
+  
+  // Listen for orientation changes
+  window.addEventListener('orientationchange', detectMobile);
+  window.addEventListener('resize', detectMobile);
+});
+
+// Expose a global flag so other parts of the app know they're running inside
+// the mobile wrapper and shouldn't override navigation state.
+if (typeof window !== 'undefined') {
+  try {
+    window.__isMobileWrapper = true;
+  } catch (e) {
+    // ignore
+  }
+}
+
+const detectMobile = () => {
+  const width = window.innerWidth;
+  const userAgent = navigator.userAgent;
+  
+  // Detect mobile based on screen width and user agent
+  isMobile.value = width <= 768 || 
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+};
+
+const setupPWA = () => {
+  // Listen for PWA install prompt
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt.value = e;
+    showInstallPrompt.value = true;
+  });
+
+  // Hide install prompt if app is already installed
+  window.addEventListener('appinstalled', () => {
+    showInstallPrompt.value = false;
+    deferredPrompt.value = null;
+  });
+};
+
+const checkAuthState = async () => {
+  // Check if user is already authenticated
+  if (authManager.isAuthenticated()) {
+    const userProfile = await authManager.getUserProfile();
+    if (userProfile) {
+      user.value = {
+        name: `${userProfile.first_name} ${userProfile.last_name}`,
+        role: userProfile.role
+      };
+    }
+  }
+};
+
+const handleLogin = (userName, role) => {
+  user.value = { name: userName, role };
+  currentView.value = isMobile.value ? 'clock' : 'dashboard';
+  toast.success(`Welcome back, ${userName}!`);
+};
+
+const handleLogout = async () => {
+  try {
+    await authManager.logout();
+    user.value = null;
+    currentView.value = 'dashboard';
+    toast.success('Logged out successfully');
+  } catch (error) {
+    console.error('Logout error:', error);
+    toast.error('Logout failed');
+  }
+};
+
+const updateCurrentView = (view) => {
+  const now = Date.now();
+  console.debug('[MobileAppWrapper] updateCurrentView ->', view, '(' + (typeof view) + ', len=' + (view && view.length ? view.length : 0) + ')', 'prev=', currentView.value, 'lastSet=', lastSet.value);
+
+  // If a rapid reset to 'dashboard' occurs within 800ms of the previous set and
+  // the previous view wasn't 'dashboard', treat it as an accidental overwrite and ignore.
+  if (
+    view === 'dashboard' &&
+    currentView.value &&
+    currentView.value !== 'dashboard' &&
+    now - lastSet.value.at < 800 &&
+    lastSet.value.view !== 'dashboard'
+  ) {
+    console.debug('[MobileAppWrapper] Ignoring rapid dashboard overwrite (from', currentView.value, '->', view, ')');
+    // update lastSet so future attempts are measured from now
+    lastSet.value = { view, at: now };
+    return;
+  }
+
+  // If the dashboard is being set programmatically (not user-intent), trace the call origin
+  if (view === 'dashboard' && currentView.value && currentView.value !== 'dashboard') {
+    console.debug('[MobileAppWrapper] dashboard set programmatically? prev=', currentView.value, 'now=', now, 'lastSet=', lastSet.value);
+    const err = new Error('[MobileAppWrapper] dashboard set - stack');
+    console.error('[MobileAppWrapper] dashboard set programmatically. Stack below:');
+    console.error(err.stack);
+    // Also emit a console.trace for richer information in Chromium logcat
+    try {
+      console.trace();
+    } catch (traceErr) {
+      // ignore if console.trace is not available
+    }
+    // Expose the stack on window so it can be inspected from DevTools or other runtime probes
+    if (typeof window !== 'undefined') {
+      try {
+        window.__lastDashboardStack = err.stack;
+      } catch (werr) {
+        // ignore write errors
+      }
+    }
+    // Also persist to localStorage (so we can read it later if console gets noisy)
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('__lastDashboardStack', err.stack || '[no-stack]');
+        // Print a short slice so logcat shows the most relevant top frames
+        const stackLines = (err.stack || '').split('\n');
+        console.error('[MobileAppWrapper] stack-snippet:', stackLines.slice(0,6).join(' | '));
+        // Print top lines individually for clearer visibility in logcat
+        stackLines.slice(0,8).forEach((ln, idx) => {
+          console.error(`[MobileAppWrapper] stack-line[${idx}] ${ln}`);
+        });
+        try {
+          localStorage.setItem('__lastDashboardStackLines', JSON.stringify(stackLines.slice(0,20)));
+        } catch (sErr) {
+          // ignore
+        }
+      }
+    } catch (lsErr) {
+      // ignore storage errors
+    }
+  }
+
+  // Accept the navigation
+  currentView.value = view;
+  lastSet.value = { view, at: now };
+};
+
+// Temporary global helper to force logout from a console or external script.
+if (typeof window !== 'undefined') {
+  // attach on window so you can call `window.forceLogout()` from DevTools
+  window.forceLogout = async () => {
+    try {
+      await handleLogout();
+      console.log('forceLogout: logout invoked');
+    } catch (e) {
+      console.error('forceLogout error', e);
+    }
+  };
+}
+
+const handleClockIn = async () => {
+  try {
+    clockedIn.value = true;
+    clockInTime.value = new Date().toLocaleTimeString('en-US', { 
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+    toast.success('Clocked in successfully');
+  } catch (error) {
+    toast.error('Failed to clock in');
+  }
+};
+
+const handleClockOut = async () => {
+  try {
+    clockedIn.value = false;
+    clockInTime.value = '';
+    toast.success('Clocked out successfully');
+  } catch (error) {
+    toast.error('Failed to clock out');
+  }
+};
+
+const installPWA = async () => {
+  if (deferredPrompt.value) {
+    deferredPrompt.value.prompt();
+    const { outcome } = await deferredPrompt.value.userChoice;
+    
+    if (outcome === 'accepted') {
+      toast.success('App installed successfully!');
+    }
+    
+    deferredPrompt.value = null;
+    showInstallPrompt.value = false;
+  }
+};
+
+const dismissInstallPrompt = () => {
+  showInstallPrompt.value = false;
+  localStorage.setItem('pwa-install-dismissed', Date.now().toString());
+};
+
+const getViewTitle = (view) => {
+  const titles = {
+    dashboard: 'Dashboard',
+    clock: 'Time Clock',
+    timesheet: 'Timesheet',
+    schedule: 'Schedule',
+    reports: 'Reports',
+    team: 'Team',
+    employees: 'Employees',
+    settings: 'Settings',
+    help: 'Help Center'
+  };
+  return titles[view] || view.charAt(0).toUpperCase() + view.slice(1);
+};
+</script>
+
+<style scoped>
+.mobile-app-wrapper {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.mobile-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.mobile-dashboard {
+  padding: 1rem;
+}
+
+.mobile-view-placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Smooth transitions */
+.mobile-app-wrapper * {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Hide scrollbars on mobile for cleaner look */
+@media (max-width: 768px) {
+  ::-webkit-scrollbar {
+    display: none;
+  }
+  
+  * {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+</style>

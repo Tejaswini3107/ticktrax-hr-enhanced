@@ -1,0 +1,43 @@
+{
+  "name": "user-friendly-time-tracking-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "chart.js": "^4.5.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.0.0",
+    "embla-carousel-vue": "^8.1.5",
+    "lucide-vue-next": "^0.395.0",
+    "radix-vue": "^1.8.2",
+    "tailwind-merge": "^2.3.0",
+    "tailwindcss-animate": "^1.0.7",
+    "v-calendar": "^3.1.2",
+    "vee-validate": "^4.12.6",
+    "vue": "^3.4.27",
+    "vue-chartjs": "^5.3.2",
+    "vue-sonner": "^1.1.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.5",
+    "autoprefixer": "^10.4.19",
+    "cordova": "^12.0.0",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "vite": "^5.2.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "mobile:prepare": "./build-mobile.sh",
+    "mobile:build": "npm run build && cd mobile && npx cordova build",
+    "mobile:build:android": "npm run build && cd mobile && npx cordova build android",
+    "mobile:build:ios": "npm run build && cd mobile && npx cordova build ios",
+    "mobile:run:android": "npm run mobile:prepare && cd mobile && npx cordova run android",
+    "mobile:run:ios": "npm run mobile:prepare && cd mobile && npx cordova run ios",
+    "mobile:open:android": "cd mobile && npx cordova open android",
+    "mobile:open:ios": "cd mobile && npx cordova open ios"
+  }
+}
