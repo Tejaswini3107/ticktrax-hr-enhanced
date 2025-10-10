@@ -29,10 +29,10 @@
           <Button variant="ghost" size="sm" class="relative">
             <Bell class="h-5 w-5" />
             <Badge 
-              v-if="notifications > 0" 
+              v-if="internalNotifications > 0" 
               class="absolute -top-1 -right-1 h-5 w-5 rounded-full text-xs"
             >
-              {{ notifications }}
+              {{ internalNotifications }}
             </Badge>
           </Button>
           
@@ -152,11 +152,15 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
+import { watch } from 'vue';
 import { 
   Clock, Users, FileText, Settings, Home, Calendar, TrendingUp, 
   Shield, Bell, HelpCircle, LogOut, User, Menu, X 
 } from 'lucide-vue-next';
 import ThemeToggle from '../ThemeToggle.vue';
+import realTimeService from '../../services/realTimeService.js';
+import authManager from '../../services/authService.js';
+import { onUnmounted } from 'vue';
 import Badge from '../ui/badge.vue';
 import Button from '../ui/button.vue';
 import ScrollArea from '../ui/scroll-area.vue';
@@ -171,6 +175,38 @@ const props = defineProps({
 const emit = defineEmits(['update:currentView', 'logout', 'profileClick']);
 
 const sidebarOpen = ref(false);
+const internalNotifications = ref(props.notifications || 0);
+
+// Subscribe to real-time notifications for the current user when mounted
+const setupNotifications = async () => {
+  try {
+    const profile = await authManager.getUserProfile();
+    const uid = profile?.id || profile?.user_id || null;
+    if (!uid) return;
+    // Join notifications channel (no-op if server not available)
+    try {
+      await realTimeService.joinNotifications(uid);
+      realTimeService.on('notification', (data) => {
+        internalNotifications.value = (internalNotifications.value || 0) + 1;
+      });
+      realTimeService.on('alert', (data) => {
+        internalNotifications.value = (internalNotifications.value || 0) + 1;
+      });
+    } catch (e) {
+      console.debug('realTimeService joinNotifications failed:', e);
+    }
+  } catch (e) {
+    console.warn('setupNotifications error', e);
+  }
+};
+
+onMounted(() => {
+  setupNotifications();
+});
+
+onUnmounted(() => {
+  try { realTimeService.off('notification'); realTimeService.off('alert'); } catch(e){}
+});
 
 const roleConfig = {
   employee: {
@@ -211,6 +247,10 @@ const roleConfig = {
 };
 
 const currentConfig = computed(() => roleConfig[props.currentRole] || roleConfig.employee);
+
+watch(() => props.notifications, (v) => {
+  internalNotifications.value = v || 0;
+});
 
 // Quick navigation items for bottom nav (max 5 items)
 const quickNavItems = computed(() => {

@@ -177,6 +177,7 @@ import Card from '../ui/card.vue';
 import { CardContent } from '../ui/card-components.vue';
 import Button from '../ui/button.vue';
 import authManager from '../../services/authService.js';
+import apiService from '../../services/apiService.js';
 
 const { toast } = useToast();
 
@@ -266,6 +267,8 @@ const handleLogin = (userName, role) => {
   user.value = { name: userName, role };
   currentView.value = isMobile.value ? 'clock' : 'dashboard';
   toast.success(`Welcome back, ${userName}!`);
+  // Load metrics for the logged-in user
+  loadUserMetrics();
 };
 
 const handleLogout = async () => {
@@ -370,6 +373,12 @@ if (typeof window !== 'undefined') {
 
 const handleClockIn = async () => {
   try {
+    // call API to clock in
+    const cur = await authManager.getCurrentUser();
+    const uid = cur?.data?.id || cur?.data?.attributes?.id || null;
+    if (uid) {
+      await apiService.clockInOut(uid, 'in');
+    }
     clockedIn.value = true;
     clockInTime.value = new Date().toLocaleTimeString('en-US', { 
       hour12: false,
@@ -377,6 +386,8 @@ const handleClockIn = async () => {
       minute: '2-digit'
     });
     toast.success('Clocked in successfully');
+    // refresh metrics on clock action
+    await loadUserMetrics();
   } catch (error) {
     toast.error('Failed to clock in');
   }
@@ -384,11 +395,57 @@ const handleClockIn = async () => {
 
 const handleClockOut = async () => {
   try {
+    // call API to clock out
+    const cur = await authManager.getCurrentUser();
+    const uid = cur?.data?.id || cur?.data?.attributes?.id || null;
+    if (uid) {
+      await apiService.clockInOut(uid, 'out');
+    }
     clockedIn.value = false;
     clockInTime.value = '';
     toast.success('Clocked out successfully');
+    await loadUserMetrics();
   } catch (error) {
     toast.error('Failed to clock out');
+  }
+};
+
+// Load user metrics (today/weekly/monthly hours) from working times
+const loadUserMetrics = async () => {
+  try {
+    const cur = await authManager.getCurrentUser();
+    const uid = cur?.data?.id || cur?.data?.attributes?.id || null;
+    if (!uid) return;
+    const rows = await apiService.getUserWorkingTimes(uid);
+    const arr = Array.isArray(rows) ? rows : (rows?.data || []);
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    let todayMinutes = 0;
+    let weekHours = 0;
+    let monthHours = 0;
+    for (const r of arr) {
+      const start = r.start_time || r.timestamp || '';
+      const datePart = start ? String(start).split('T')[0] : '';
+      const hours = Number(r.duration_hours || r.hours || 0) || 0;
+      if (datePart === todayStr) {
+        todayMinutes += hours * 60;
+      }
+      // weekly: last 7 days
+      const entryDate = start ? new Date(start) : null;
+      if (entryDate) {
+        const daysAgo = Math.floor((now - entryDate) / (1000 * 60 * 60 * 24));
+        if (daysAgo >=0 && daysAgo < 7) weekHours += hours;
+        if (entryDate.getMonth() === now.getMonth() && entryDate.getFullYear() === now.getFullYear()) monthHours += hours;
+      }
+    }
+    // format HH:MM for workTimeToday
+    const h = Math.floor(todayMinutes / 60);
+    const m = Math.round(todayMinutes % 60);
+    workTimeToday.value = `${h}:${String(m).padStart(2,'0')}`;
+    weeklyHours.value = `${Math.round(weekHours)}h`;
+    monthlyHours.value = `${Math.round(monthHours)}h`;
+  } catch (e) {
+    console.warn('loadUserMetrics failed', e);
   }
 };
 

@@ -30,108 +30,194 @@ import {
   TabsTrigger,
 } from '../ui/tabs.vue';
 
-const weeklyHoursChartData = {
+import { ref, onMounted } from 'vue';
+import apiService from '../../services/apiService.js';
+
+// Reactive metric values (will be populated from API)
+const totalHours = ref(0);
+const overtimeHours = ref(0);
+const teamSize = ref(0);
+const avgEfficiency = ref(0);
+
+// Charts and datasets (default to sensible demo values while loading)
+const weeklyHoursChartData = ref({
   labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
   datasets: [
-    {
-      label: 'Regular Hours',
-      data: [42, 40, 38, 41, 39, 12, 0],
-      backgroundColor: '#3b82f6',
-      borderColor: '#3b82f6',
-      borderWidth: 1
-    },
-    {
-      label: 'Overtime',
-      data: [3, 5, 2, 4, 6, 8, 0],
-      backgroundColor: '#f59e0b',
-      borderColor: '#f59e0b',
-      borderWidth: 1
-    }
+    { label: 'Regular Hours', data: [0,0,0,0,0,0,0], backgroundColor: '#3b82f6', borderColor: '#3b82f6', borderWidth: 1 },
+    { label: 'Overtime', data: [0,0,0,0,0,0,0], backgroundColor: '#f59e0b', borderColor: '#f59e0b', borderWidth: 1 }
   ]
+});
+
+const monthlyTrendChartData = ref({ labels: [], datasets: [{ label: 'Total Hours', data: [], borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', fill: true, tension: 0.4 }] });
+
+const attendanceChartData = ref({ labels: ['Present', 'Late', 'Absent', 'Leave'], datasets: [{ data: [0,0,0,0], backgroundColor: ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6'], borderWidth: 2, borderColor: '#ffffff' }] });
+const attendanceData = ref([
+  { name: 'Present', value: 0, color: '#10b981' },
+  { name: 'Late', value: 0, color: '#f59e0b' },
+  { name: 'Absent', value: 0, color: '#ef4444' },
+  { name: 'Leave', value: 0, color: '#8b5cf6' },
+]);
+
+const monthlyTrendData = ref([]);
+
+const productivityData = ref([]);
+const overtimeBreakdown = ref([]);
+
+// Helper: normalize user object to id and name
+function normalizeUser(u) {
+  const id = u?.id || u?.attributes?.id || u?.attributes?.user_id;
+  const name = u?.attributes?.name || u?.attributes?.full_name || u?.name || `${u?.attributes?.first_name || ''} ${u?.attributes?.last_name || ''}`.trim() || 'Unknown';
+  return { id, name };
+}
+
+const loadManagerReports = async () => {
+  try {
+    const users = await apiService.listUsers();
+    const userArray = Array.isArray(users) ? users : (users?.data || []);
+    const sample = userArray.slice(0, 50);
+    teamSize.value = userArray.length;
+
+    let monthHours = 0;
+    let monthOvertime = 0;
+    const now = new Date();
+    const currMonth = now.getMonth();
+    const currYear = now.getFullYear();
+
+    // collect rows to build charts
+    const last7 = new Array(7).fill(0);
+    const last7Over = new Array(7).fill(0);
+    const monthBuckets = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(); d.setMonth(d.getMonth() - i);
+      monthBuckets.push({ month: d.toLocaleString('en-US', { month: 'short' }), totalHours: 0, overtime: 0 });
+    }
+
+    const attendanceCounts = { present: 0, late: 0, absent: 0, leave: 0 };
+    const prodList = [];
+    const deptMap = new Map();
+
+    // iterate sampled users and fetch working times
+    await Promise.all(sample.map(async (u) => {
+      try {
+        const { id, name } = normalizeUser(u);
+        if (!id) return;
+        const rowsRes = await apiService.getUserWorkingTimes(id);
+        const rows = Array.isArray(rowsRes) ? rowsRes : (rowsRes?.data || []);
+        let userHours = 0;
+        let userOver = 0;
+
+        for (const r of rows) {
+          const start = r.start_time || r.timestamp || r.date || '';
+          const d = start ? new Date(start) : null;
+          const hours = Number(r.duration_hours || r.hours || 0) || 0;
+          const isOver = !!r.overtime;
+
+          // monthly totals
+          if (d && d.getMonth() === currMonth && d.getFullYear() === currYear) {
+            monthHours += hours;
+            if (isOver) monthOvertime += hours;
+          }
+
+          // last 7 days distribution
+          if (d) {
+            const diff = Math.floor((now - d) / (1000 * 60 * 60 * 24));
+            if (diff >= 0 && diff < 7) {
+              const dayIdx = (7 - 1) - diff; // map 0..6 to Mon..Sun-ish order later
+              last7[dayIdx] += hours;
+              if (isOver) last7Over[dayIdx] += hours;
+            }
+          }
+
+          // month buckets
+          if (d) {
+            const label = d.toLocaleString('en-US', { month: 'short' });
+            const b = monthBuckets.find(x => x.month === label);
+            if (b) {
+              b.totalHours += hours;
+              if (isOver) b.overtime += hours;
+            }
+          }
+
+          // attendance heuristics
+          const st = (r.status || '').toLowerCase();
+          if (st.includes('present')) attendanceCounts.present++;
+          else if (st.includes('late')) attendanceCounts.late++;
+          else if (st.includes('absent')) attendanceCounts.absent++;
+          else if (st.includes('leave')) attendanceCounts.leave++;
+
+          userHours += hours;
+          if (isOver) userOver += hours;
+        }
+
+        prodList.push({ employee: name, hoursLogged: Math.round(userHours), tasksCompleted: rintOrZero(rowsRes, 'tasks_completed'), efficiency: estimateEfficiency(userHours, userOver) });
+
+        // department overtime aggregation (if department available on user)
+        const dept = u?.attributes?.department || u?.department || 'Unassigned';
+        const prev = deptMap.get(dept) || { hours: 0, cost: 0 };
+        prev.hours += userOver;
+        prev.cost += userOver * 30; // rough $30/hr assumption for cost estimation
+        deptMap.set(dept, prev);
+
+      } catch (e) {
+        // ignore per-user errors
+      }
+    }));
+
+    totalHours.value = Math.round(monthHours);
+    overtimeHours.value = Math.round(monthOvertime);
+    avgEfficiency.value = Math.round(estimateEfficiency(monthHours, monthOvertime));
+
+    // prepare weekly chart (labels Mon..Sun)
+    weeklyHoursChartData.value.datasets[0].data = last7;
+    weeklyHoursChartData.value.datasets[1].data = last7Over;
+
+    // prepare monthly trend
+    monthlyTrendChartData.value.labels = monthBuckets.map(m => m.month);
+    monthlyTrendChartData.value.datasets[0].data = monthBuckets.map(m => Math.round(m.totalHours));
+    monthlyTrendData.value = monthBuckets.map(m => ({ month: m.month, hours: Math.round(m.totalHours), target: 160 }));
+
+    // attendance
+    attendanceChartData.value.datasets[0].data = [attendanceCounts.present, attendanceCounts.late, attendanceCounts.absent, attendanceCounts.leave];
+    attendanceData.value = [
+      { name: 'Present', value: attendanceCounts.present, color: '#10b981' },
+      { name: 'Late', value: attendanceCounts.late, color: '#f59e0b' },
+      { name: 'Absent', value: attendanceCounts.absent, color: '#ef4444' },
+      { name: 'Leave', value: attendanceCounts.leave, color: '#8b5cf6' },
+    ];
+
+    // productivity and overtime tables
+    productivityData.value = prodList.slice(0, 20).sort((a,b) => b.hoursLogged - a.hoursLogged);
+    overtimeBreakdown.value = Array.from(deptMap.entries()).map(([department, v]) => ({ department, hours: Math.round(v.hours), cost: `$${Math.round(v.cost)}` }));
+
+  } catch (e) {
+    console.error('Failed to load manager reports', e);
+    // leave defaults (demo-like) if API fails
+  }
 };
 
-const monthlyTrendChartData = {
-  labels: ['May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'],
-  datasets: [
-    {
-      label: 'Total Hours',
-      data: [180, 175, 190, 185, 195, 172],
-      borderColor: '#3b82f6',
-      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-      fill: true,
-      tension: 0.4
-    }
-  ]
-};
+// small helpers
+function rintOrZero(rowsRes, key) {
+  try {
+    const rows = Array.isArray(rowsRes) ? rowsRes : (rowsRes?.data || []);
+    // try to sum key if exists per row
+    return rows.reduce((s, r) => s + (Number(r[key] || 0) || 0), 0) || 0;
+  } catch (e) { return 0; }
+}
 
-const attendanceChartData = {
-  labels: ['Present', 'Late', 'Absent', 'Leave'],
-  datasets: [
-    {
-      data: [85, 10, 3, 2],
-      backgroundColor: ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
-      borderWidth: 2,
-      borderColor: '#ffffff'
-    }
-  ]
-};
+function estimateEfficiency(hours, overtime) {
+  try {
+    const total = Number(hours) || 0;
+    const over = Number(overtime) || 0;
+    if (!total) return 90;
+    const overPct = (over / total) * 100;
+    const eff = Math.max(50, 100 - Math.round(overPct * 0.5));
+    return eff;
+  } catch (e) { return 90; }
+}
 
-const attendanceData = [
-  { name: 'Present', value: 85, color: '#10b981' },
-  { name: 'Late', value: 10, color: '#f59e0b' },
-  { name: 'Absent', value: 3, color: '#ef4444' },
-  { name: 'Leave', value: 2, color: '#8b5cf6' },
-];
-
-const monthlyTrendData = [
-  { month: 'Apr', hours: 172, target: 160 },
-  { month: 'May', hours: 168, target: 160 },
-  { month: 'Jun', hours: 175, target: 160 },
-  { month: 'Jul', hours: 182, target: 160 },
-  { month: 'Aug', hours: 178, target: 160 },
-  { month: 'Sep', hours: 185, target: 160 },
-];
-
-
-const productivityData = [
-  {
-    employee: 'John Smith',
-    hoursLogged: 178,
-    tasksCompleted: 24,
-    efficiency: 95,
-  },
-  {
-    employee: 'Sarah Johnson',
-    hoursLogged: 182,
-    tasksCompleted: 28,
-    efficiency: 98,
-  },
-  {
-    employee: 'Mike Davis',
-    hoursLogged: 165,
-    tasksCompleted: 20,
-    efficiency: 88,
-  },
-  {
-    employee: 'Emily Chen',
-    hoursLogged: 172,
-    tasksCompleted: 25,
-    efficiency: 92,
-  },
-  {
-    employee: 'David Wilson',
-    hoursLogged: 168,
-    tasksCompleted: 22,
-    efficiency: 90,
-  },
-];
-
-const overtimeBreakdown = [
-  { department: 'Production', hours: 145, cost: '$4,350' },
-  { department: 'Warehouse', hours: 98, cost: '$2,940' },
-  { department: 'Quality Control', hours: 67, cost: '$2,010' },
-  { department: 'Maintenance', hours: 52, cost: '$1,560' },
-];
+onMounted(() => {
+  loadManagerReports();
+});
 </script>
 
 <template>

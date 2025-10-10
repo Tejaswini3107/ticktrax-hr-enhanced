@@ -10,7 +10,7 @@ import authManager from '../../services/authService.js';
 
 const emit = defineEmits(['login']);
 
-const emailOrUsername = ref("");
+const email = ref("");
 const password = ref("");
 const showPassword = ref(false);
 const error = ref("");
@@ -18,7 +18,7 @@ const isLoading = ref(false);
 
 const handleLogin = async () => {
   error.value = "";
-  const email = (emailOrUsername.value || '').trim();
+  const emailVal = (email.value || '').trim();
   const pwd = (password.value || '').trim();
   if (!email || !pwd) {
     error.value = "Email and password are required";
@@ -26,26 +26,26 @@ const handleLogin = async () => {
   }
   isLoading.value = true;
   try {
-    const result = await authManager.login(email, pwd);
+    const result = await authManager.login(emailVal, pwd);
     if (result.success) {
       emit('login', `${result.user.first_name} ${result.user.last_name}`, result.user.role);
     } else {
-      error.value = result.error || "Invalid email/username or password";
+      error.value = result.error || "Invalid email or password";
     }
   } catch (err) {
-    error.value = err?.message || "Invalid email/username or password";
+    error.value = err?.message || "Invalid email or password";
   } finally {
     isLoading.value = false;
   }
 };
 
 const getFormValues = () => ({
-  emailOrUsername: emailOrUsername.value,
+  email: email.value,
   password: password.value
 });
 
 const clearForm = () => {
-  emailOrUsername.value = "";
+  email.value = "";
   password.value = "";
   error.value = "";
 };
@@ -53,7 +53,7 @@ const clearForm = () => {
 defineExpose({
   getFormValues,
   clearForm,
-  emailOrUsername,
+  email,
   password
 });
 </script>
@@ -77,12 +77,12 @@ defineExpose({
         </CardHeader>
         <CardContent class="space-y-4">
           <div class="space-y-2">
-            <Label for="emailOrUsername">Email Address</Label>
+            <Label for="email">Email Address</Label>
             <Input 
-              id="emailOrUsername" 
+              id="email" 
               type="email"
               placeholder="Enter your email address"
-              v-model="emailOrUsername" 
+              v-model="email" 
               @keydown.enter="handleLogin" 
             />
           </div>

@@ -231,9 +231,9 @@ const handleBiometricLogin = async () => {
     // Attempt to use stored last_login_user email and fetch profile from API
     const lastUser = localStorage.getItem('last_login_user');
     if (lastUser) {
-      // If we have an authenticated session, get current user profile
+      // If we have an authenticated session, get current user profile and match by email only
       const cur = await authManager.getCurrentUser();
-      if (cur && cur.success && cur.data && (cur.data.email === lastUser || cur.data.username === lastUser)) {
+      if (cur && cur.success && cur.data && cur.data.email === lastUser) {
         const user = cur.data;
         const displayName = user.name || `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email;
         const role = user.role || 'employee';

@@ -96,25 +96,19 @@ const setDashboard = () => {
 
 // Check for existing authentication on app startup
 onMounted(async () => {
-  // Only attempt backend authentication if we have a stored token
-  const storedToken = localStorage.getItem('csrf_token');
-  if (storedToken) {
-    try {
-      const userProfile = await authManager.getUserProfile();
-      if (userProfile) {
-          user.value = {
-            name: `${userProfile.first_name} ${userProfile.last_name}`,
-            role: userProfile.role
-          };
-          setDashboard();
-          toast.success('Welcome back!');
-        }
-    } catch (error) {
-      console.log('Backend not available, using demo mode');
-      // Clear invalid tokens and continue in demo mode
-      authManager.csrfToken = null;
-      localStorage.removeItem('csrf_token');
+  try {
+    const current = await authManager.getCurrentUser();
+    if (current && current.success && current.data) {
+      const profile = current.data;
+      user.value = {
+        name: profile.name || `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || profile.email,
+        role: profile.role || 'employee'
+      };
+      setDashboard();
+      toast.success('Welcome back!');
     }
+  } catch (error) {
+    console.log('No authenticated user on startup');
   }
 });
 </script>

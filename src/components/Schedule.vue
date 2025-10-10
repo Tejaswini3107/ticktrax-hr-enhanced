@@ -92,7 +92,17 @@ const loadSchedules = async () => {
 
 onMounted(loadSchedules);
 
-const currentSchedule = computed(() => weeklySchedules[currentWeek.value] || weeklySchedules[0]);
+const currentSchedule = computed(() => {
+  const weeks = Array.isArray(weeklySchedules.value) ? weeklySchedules.value : [];
+  const s = weeks[currentWeek.value] || weeks[0] || null;
+  return s || { weekOf: formatWeekRange(currentWeek.value), totalHours: 0, entries: [] };
+});
+
+// Safe, template-friendly accessors to avoid reading properties of undefined
+const scheduleObj = computed(() => currentSchedule.value || { weekOf: formatWeekRange(currentWeek.value), totalHours: 0, entries: [] });
+const scheduleTotalHours = computed(() => scheduleObj.value.totalHours ?? 0);
+const scheduleEntries = computed(() => Array.isArray(scheduleObj.value.entries) ? scheduleObj.value.entries : []);
+const scheduleWeekOf = computed(() => scheduleObj.value.weekOf ?? formatWeekRange(currentWeek.value));
 
 const getStatusColor = (status) => {
   switch (status) {
@@ -110,20 +120,19 @@ const getStatusColor = (status) => {
 };
 
 const getLocationIcon = (location) => {
-  if (location.toLowerCase().includes('remote')) {
-    return '🏠';
-  } else if (location.toLowerCase().includes('client')) {
-    return '🏢';
-  } else {
-    return '🏬';
-  }
+  if (!location) return '🏬';
+  const lower = String(location).toLowerCase();
+  if (lower.includes('remote')) return '🏠';
+  if (lower.includes('client')) return '🏢';
+  return '🏬';
 };
 
 const dayScheduleForSelectedDate = computed(() => {
   const selectedDateStr = selectedDate.value.toISOString().split('T')[0];
-  return weeklySchedules
-    .flatMap((week) => week.entries)
-    .find((entry) => entry.date === selectedDateStr);
+  const weeks = Array.isArray(weeklySchedules.value) ? weeklySchedules.value : [];
+  return weeks
+    .flatMap((week) => Array.isArray(week.entries) ? week.entries : [])
+    .find((entry) => entry && entry.date === selectedDateStr);
 });
 </script>
 
@@ -143,7 +152,7 @@ const dayScheduleForSelectedDate = computed(() => {
           <div class="flex items-center justify-between">
             <div>
               <p class="text-sm text-muted-foreground">This Week</p>
-              <p class="text-2xl mt-1">{{ currentSchedule.totalHours }}h</p>
+              <p class="text-2xl mt-1">{{ scheduleTotalHours }}h</p>
             </div>
             <Clock class="h-8 w-8 text-primary" />
           </div>
@@ -154,7 +163,7 @@ const dayScheduleForSelectedDate = computed(() => {
           <div class="flex items-center justify-between">
             <div>
               <p class="text-sm text-muted-foreground">Days Scheduled</p>
-              <p class="text-2xl mt-1">{{ currentSchedule.entries.length }}</p>
+              <p class="text-2xl mt-1">{{ scheduleEntries.length }}</p>
             </div>
             <CalendarIcon class="h-8 w-8 text-blue-500" />
           </div>
@@ -166,11 +175,7 @@ const dayScheduleForSelectedDate = computed(() => {
             <div>
               <p class="text-sm text-muted-foreground">Remote Days</p>
               <p class="text-2xl mt-1">
-                {{
-                  currentSchedule.entries.filter((e) =>
-                    e.location.toLowerCase().includes('remote')
-                  ).length
-                }}
+                {{ (scheduleEntries.filter((e) => e && e.location && String(e.location).toLowerCase().includes('remote'))).length }}
               </p>
             </div>
             <MapPin class="h-8 w-8 text-green-500" />
@@ -202,10 +207,10 @@ const dayScheduleForSelectedDate = computed(() => {
                   <ChevronLeft class="h-4 w-4" />
                 </Button>
                 <div>
-                  <CardTitle>Week of {{ currentSchedule.weekOf }}</CardTitle>
-                  <p class="text-sm text-muted-foreground mt-1">
-                    Total: {{ currentSchedule.totalHours }} hours scheduled
-                  </p>
+                  <CardTitle>Week of {{ scheduleWeekOf }}</CardTitle>
+                      <p class="text-sm text-muted-foreground mt-1">
+                        Total: {{ scheduleTotalHours }} hours scheduled
+                      </p>
                 </div>
                 <Button
                   variant="outline"
@@ -238,7 +243,7 @@ const dayScheduleForSelectedDate = computed(() => {
               </TableHeader>
               <TableBody>
                 <TableRow
-                  v-for="entry in currentSchedule.entries"
+                  v-for="entry in (currentSchedule?.entries ?? [])"
                   :key="entry.id"
                 >
                   <TableCell class="font-medium">{{

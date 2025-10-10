@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { Dialog, DialogHeader, DialogTitle } from "../ui/dialog.vue";
 import DialogContent from "../ui/dialog-template.vue";
 import Button from "../ui/button.vue";
@@ -8,6 +8,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import Badge from "../ui/badge.vue";
 import { Search, UserPlus, MapPin } from "lucide-vue-next";
 import { toast } from 'vue-sonner';
+import apiService from '../../services/apiService.js';
+import authManager from '../../services/authService.js';
+import { API_CONFIG } from '../../config/api.js';
 
 type Employee = {
   id: string;
@@ -27,22 +30,52 @@ const emit = defineEmits(['update:open', 'add']);
 
 const searchQuery = ref("");
 const selectedEmployees = ref<Set<string>>(new Set());
-
-const availableEmployees: Employee[] = [
-    { id: "EMP007", name: "Alex Rodriguez", department: "Production", role: "employee", status: "active", type: "Regular", currentTeam: "Team B" },
-    { id: "EMP008", name: "Jennifer Chang", department: "Quality Control", role: "employee", status: "active", type: "Regular", currentTeam: "Unassigned" },
-    { id: "EMP009", name: "Robert Kim", department: "Field Service", role: "employee", status: "active", type: "Field Worker", currentTeam: "Unassigned" },
-    { id: "EMP010", name: "Maria Santos", department: "Warehouse", role: "employee", status: "active", type: "Warehouse", currentTeam: "Team C" },
-    { id: "EMP011", name: "Thomas Brown", department: "Production", role: "employee", status: "active", type: "Regular", currentTeam: "Unassigned" },
-];
+const availableEmployees = ref<Employee[]>([]);
+const loading = ref(false);
+const teamId = ref<string | null>(null);
+const teamName = ref('Unassigned');
 
 const filteredEmployees = computed(() =>
-  availableEmployees.filter(employee =>
+  availableEmployees.value.filter(employee =>
     employee.name.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
     employee.department.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
     employee.id.toLowerCase().includes(searchQuery.value.toLowerCase())
   )
 );
+
+const loadAvailableEmployees = async () => {
+  try {
+    const cur = await authManager.getCurrentUser();
+    if (!cur.success) {
+      toast.error('You must be signed in to manage team members.');
+      return;
+    }
+    const user = cur.data || {};
+    teamId.value = user.team_id || user.attributes?.team_id || null;
+    teamName.value = user.team_name || user.attributes?.team_name || (teamId.value ? `Team ${teamId.value}` : 'Unassigned');
+
+    const users = await apiService.listUsers();
+    const normalized = (Array.isArray(users) ? users : []).map((u: any) => {
+      const attrs = u.attributes || {};
+      return {
+        id: u.id || attrs.id || String(u.id || attrs.email || ''),
+        name: attrs.first_name ? `${attrs.first_name} ${attrs.last_name}` : (u.name || u.email || 'Unknown'),
+        department: attrs.department || u.department || 'Unknown',
+        role: (attrs.role || u.role || 'employee'),
+        status: attrs.status || u.status || 'active',
+        type: attrs.type || 'Regular',
+        currentTeam: attrs.team_name || u.team_name || (attrs.team_id ? `Team ${attrs.team_id}` : (u.team_id ? `Team ${u.team_id}` : 'Unassigned'))
+      } as Employee;
+    });
+    availableEmployees.value = normalized;
+  } catch (e) {
+    console.error('Failed to load employees', e);
+    toast.error('Unable to load employees from server.');
+  }
+};
+
+// Load when dialog opens
+watch(() => props.open, (v) => { if (v) loadAvailableEmployees(); });
 
 const handleSelectEmployee = (employeeId: string) => {
   const newSelected = new Set(selectedEmployees.value);
@@ -54,17 +87,45 @@ const handleSelectEmployee = (employeeId: string) => {
   selectedEmployees.value = newSelected;
 };
 
-const handleAddSelected = () => {
-  const selectedEmployeesList = availableEmployees.filter(emp => selectedEmployees.value.has(emp.id));
+const handleAddSelected = async () => {
+  const selectedEmployeesList = availableEmployees.value.filter(emp => selectedEmployees.value.has(emp.id));
   if (selectedEmployeesList.length === 0) {
     toast.error("Please select at least one employee to add to your team.");
     return;
   }
-  selectedEmployeesList.forEach(employee => {
-    emit('add', employee);
-  });
-  toast.success(`Added ${selectedEmployeesList.length} employee${selectedEmployeesList.length > 1 ? "s" : ""} to your team!`);
-  handleClose();
+
+  if (!teamId.value) {
+    toast.error('Your account is not assigned to a team. Cannot add members.');
+    return;
+  }
+
+  loading.value = true;
+  try {
+    const endpointTemplate = API_CONFIG.ENDPOINTS.USERS.BY_ID; // '/users/:id'
+    const promises = selectedEmployeesList.map(emp => {
+      const endpoint = endpointTemplate.replace(':id', String(emp.id));
+      // Update user with team_id; backend may expect { user: { team_id } } or { team_id }
+      // We send { user: { team_id } } which is compatible with common Rails-style APIs.
+      return apiService.request(endpoint, { method: 'PUT', body: JSON.stringify({ user: { team_id: teamId.value } }) })
+        .then(res => ({ success: true, emp, res }))
+        .catch(err => ({ success: false, emp, err }));
+    });
+
+    const results = await Promise.all(promises);
+    const successCount = results.filter(r => r.success).length;
+    if (successCount > 0) {
+      toast.success(`Added ${successCount} employee${successCount > 1 ? 's' : ''} to ${teamName.value}`);
+      results.filter(r => r.success).forEach(r => emit('add', r.emp));
+      handleClose();
+    } else {
+      toast.error('Failed to add selected employees.');
+    }
+  } catch (e) {
+    console.error('Add members failed', e);
+    toast.error('An error occurred while adding members.');
+  } finally {
+    loading.value = false;
+  }
 };
 
 const handleClose = () => {

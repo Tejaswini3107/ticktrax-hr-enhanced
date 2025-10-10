@@ -99,9 +99,13 @@ const defaultEntries = computed(() =>
   import apiService from '../../services/apiService.js';
   import authManager from '../../services/authService.js';
   import { ref, onMounted } from 'vue';
+  import { toast } from 'vue-sonner';
+
+  // reactive state
+  const apiEntries = ref([]);
+  const processingId = ref(null);
 
   // If no entries provided, attempt to load from API using employee prop (if present)
-  const apiEntries = ref([]);
   const loadApiEntries = async () => {
     try {
       if (props.entries && props.entries.length) return;
@@ -111,12 +115,15 @@ const defaultEntries = computed(() =>
       const data = await apiService.getUserWorkingTimes(empId);
       const rows = Array.isArray(data) ? data : (data?.data || []);
       apiEntries.value = rows.map(r => ({
+        rawId: r.id || r._id || null,
         date: r.start_time ? r.start_time.split('T')[0] : (r.timestamp || ''),
         clockIn: r.clock_in || r.start_time || '',
         clockOut: r.clock_out || r.end_time || '',
         hours: r.duration_hours || r.hours || 0,
         status: r.status || (r.approved ? 'approved' : (r.pending_approval ? 'pending' : 'unknown')),
-        location: r.location || r.notes || ''
+        pending: Boolean(r.pending_approval || r.status === 'pending'),
+        location: r.location || r.notes || '',
+        notes: r.notes || r.comment || ''
       }));
     } catch (err) {
       console.warn('TimesheetDetailsDialog: failed to load entries', err);
@@ -126,7 +133,7 @@ const defaultEntries = computed(() =>
   onMounted(loadApiEntries);
 
 const totalHours = computed(() =>
-  defaultEntries.value.reduce((sum, entry) => sum + entry.hours, 0)
+  defaultEntries.value.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0)
 );
 const regularHours = computed(() =>
   defaultEntries.value
@@ -145,6 +152,50 @@ const formatDate = (dateString) => {
     month: 'short',
     day: 'numeric',
   });
+};
+
+// Approve a single timesheet entry
+const approveEntry = async (entry) => {
+  if (!entry.rawId) {
+    toast.error('Cannot approve: missing entry id');
+    return;
+  }
+  try {
+    processingId.value = entry.rawId;
+    await apiService.validateTimesheet(entry.rawId, { approved: true });
+    entry.status = 'approved';
+    entry.pending = false;
+    toast.success('Time entry approved');
+    // notify dashboards to refresh
+    window.dispatchEvent(new CustomEvent('clock-changed'));
+  } catch (e) {
+    console.error('Approve failed', e);
+    toast.error('Failed to approve entry');
+  } finally {
+    processingId.value = null;
+  }
+};
+
+// Reject a single timesheet entry (ask for optional reason)
+const rejectEntry = async (entry) => {
+  if (!entry.rawId) {
+    toast.error('Cannot reject: missing entry id');
+    return;
+  }
+  const reason = window.prompt('Rejection reason (optional):', 'Rejected by manager');
+  try {
+    processingId.value = entry.rawId;
+    await apiService.validateTimesheet(entry.rawId, { approved: false, reason: reason || 'Rejected by manager' });
+    entry.status = 'rejected';
+    entry.pending = false;
+    toast.success('Time entry rejected');
+    window.dispatchEvent(new CustomEvent('clock-changed'));
+  } catch (e) {
+    console.error('Reject failed', e);
+    toast.error('Failed to reject entry');
+  } finally {
+    processingId.value = null;
+  }
 };
 </script>
 

@@ -27,31 +27,90 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import toast from '../../utils/toast.js';
 import Card from '../ui/card.vue';
 import { CardContent } from '../ui/card-components.vue';
 import Button from '../ui/button.vue';
+import apiService from '../../services/apiService.js';
+import authManager from '../../services/authService.js';
 
-const approvals = ref([
-  { id: 1, title: 'Time adjustment for Oct 3', by: 'Alice', date: '2025-10-03' },
-  { id: 2, title: 'Overtime approval for Sep 28', by: 'Bob', date: '2025-09-28' }
-]);
+const approvals = ref([]);
+const isLoading = ref(false);
 
-const approve = (item) => {
-  // TODO: call approvals API when available
-  toast.success(`Approved: ${item.title}`);
-  approvals.value = approvals.value.filter(a => a.id !== item.id);
+const loadApprovals = async () => {
+  try {
+    isLoading.value = true;
+    const cur = await authManager.getCurrentUser();
+    if (!cur.success) throw new Error('Not signed in');
+
+    // Collect pending approvals by scanning recent working times for team users
+    const users = await apiService.listUsers();
+    const list = [];
+    for (const u of (Array.isArray(users) ? users : []).slice(0, 30)) {
+      try {
+        const uid = u.id || u.attributes?.id;
+        const times = await apiService.getUserWorkingTimes(uid);
+        const pending = (Array.isArray(times) ? times : []).filter(t => t.pending_approval || t.status === 'pending');
+        pending.slice(0,2).forEach(p => list.push({
+          id: p.id || `${uid}-${p.timestamp || p.start_time}`,
+          title: p.type || 'Time Entry',
+          by: u.attributes?.email || u.email || u.name || 'Unknown',
+          date: (p.start_time || p.timestamp || '').split('T')[0] || '-',
+          raw: p,
+          userId: uid
+        }));
+      } catch (e) {
+        console.warn('loadApprovals: failed for user', e);
+      }
+    }
+    approvals.value = list.slice(0, 50);
+  } catch (err) {
+    console.warn('loadApprovals failed', err);
+    toast.error('Unable to load approvals from server');
+  } finally {
+    isLoading.value = false;
+  }
 };
 
-const reject = (item) => {
-  toast.warning(`Rejected: ${item.title}`);
-  approvals.value = approvals.value.filter(a => a.id !== item.id);
+const approve = async (item) => {
+  try {
+    // If API has a timesheet id, attempt to validate via API
+    if (item.raw?.id) {
+      await apiService.validateTimesheet(item.raw.id, { approved: true });
+      toast.success(`Approved: ${item.title}`);
+    } else {
+      toast.success(`Approved: ${item.title}`);
+    }
+    approvals.value = approvals.value.filter(a => a.id !== item.id);
+  } catch (e) {
+    console.error('approve failed', e);
+    toast.error('Unable to approve entry');
+  }
 };
 
-const loadMore = () => {
+const reject = async (item) => {
+  try {
+    if (item.raw?.id) {
+      await apiService.validateTimesheet(item.raw.id, { approved: false, reason: 'Rejected by manager' });
+      toast.warning(`Rejected: ${item.title}`);
+    } else {
+      toast.warning(`Rejected: ${item.title}`);
+    }
+    approvals.value = approvals.value.filter(a => a.id !== item.id);
+  } catch (e) {
+    console.error('reject failed', e);
+    toast.error('Unable to reject entry');
+  }
+};
+
+const loadMore = async () => {
   toast.info('Loading more approvals...');
+  // Try to fetch again (could implement paging later)
+  await loadApprovals();
 };
+
+onMounted(loadApprovals);
 </script>
 
 <style scoped>

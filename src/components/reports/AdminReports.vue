@@ -40,16 +40,12 @@ import {
   TabsTrigger,
 } from '../ui/tabs.vue';
 
-const workforceAnalytics = [
-  { month: 'Apr', totalHours: 7200, overtime: 320, efficiency: 85 },
-  { month: 'May', totalHours: 7450, overtime: 380, efficiency: 87 },
-  { month: 'Jun', totalHours: 7800, overtime: 450, efficiency: 89 },
-  { month: 'Jul', totalHours: 7650, overtime: 420, efficiency: 88 },
-  { month: 'Aug', totalHours: 7900, overtime: 480, efficiency: 91 },
-  { month: 'Sep', totalHours: 8100, overtime: 520, efficiency: 92 },
-];
+import { ref, onMounted, computed } from 'vue';
+import apiService from '../../services/apiService.js';
 
-const departmentPerformance = [
+const workforceAnalytics = ref([]);
+
+const departmentPerformance = ref([
   {
     dept: 'Production',
     employees: 45,
@@ -85,9 +81,9 @@ const departmentPerformance = [
     efficiency: 93,
     utilization: 88,
   },
-];
+]);
 
-const complianceData = [
+const complianceData = ref([
   {
     metric: 'Time Policy Violations',
     value: 2,
@@ -108,9 +104,9 @@ const complianceData = [
     status: 'warning',
     target: 0,
   },
-];
+]);
 
-const workforceData = [
+const workforceData = ref([
   {
     month: 'Apr',
     hires: 3,
@@ -153,9 +149,9 @@ const workforceData = [
     netChange: 2,
     retention: 98,
   },
-];
+]);
 
-const shiftDistribution = [
+const shiftDistribution = ref([
   { hour: '6 AM', employees: 12 },
   { hour: '7 AM', employees: 35 },
   { hour: '8 AM', employees: 68 },
@@ -169,7 +165,102 @@ const shiftDistribution = [
   { hour: '4 PM', employees: 75 },
   { hour: '5 PM', employees: 45 },
   { hour: '6 PM', employees: 25 },
-];
+]);
+
+const totalEmployees = ref(0);
+const monthlyHours = ref(0);
+const complianceIssues = ref(0);
+
+const loadAdminReports = async () => {
+  try {
+    const users = await apiService.listUsers();
+    const userArray = Array.isArray(users) ? users : (users?.data || []);
+    totalEmployees.value = userArray.length;
+
+    // Compute monthly hours by sampling up to 50 users to avoid heavy processing
+    let monthHours = 0;
+    const sample = userArray.slice(0, 50);
+    const now = new Date();
+    const month = now.getMonth();
+    const year = now.getFullYear();
+
+    await Promise.all(sample.map(async (u) => {
+      try {
+        const uid = u.id || u.attributes?.id;
+        if (!uid) return;
+        const times = await apiService.getUserWorkingTimes(uid);
+        const rows = Array.isArray(times) ? times : (times?.data || []);
+        for (const r of rows) {
+          const start = r.start_time || r.timestamp || '';
+          const d = start ? new Date(start) : null;
+          if (d && d.getMonth() === month && d.getFullYear() === year) {
+            monthHours += Number(r.duration_hours || r.hours || 0) || 0;
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    }));
+
+    monthlyHours.value = Math.round(monthHours);
+    // simple heuristic for compliance issues: count 'pending' or 'missing_clock_out' in working time rows (sampled)
+    let issues = 0;
+    for (const u of sample) {
+      try {
+        const uid = u.id || u.attributes?.id;
+        if (!uid) continue;
+        const rows = await apiService.getUserWorkingTimes(uid);
+        const arr = Array.isArray(rows) ? rows : (rows?.data || []);
+        issues += arr.filter(r => r.status === 'missing_clock_out' || r.status === 'violation' || r.pending_approval).length;
+      } catch (e) {}
+    }
+    complianceIssues.value = issues;
+
+    // Build simple workforceAnalytics: last 6 months totals (client-side estimation)
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(); d.setMonth(d.getMonth() - i);
+      months.push({ month: d.toLocaleString('en-US', { month: 'short' }), totalHours: 0, overtime: 0, efficiency: 0 });
+    }
+    // aggregate sample rows into months buckets
+    const allRows = [];
+    for (const u of sample) {
+      try {
+        const uid = u.id || u.attributes?.id;
+        if (!uid) continue;
+        const rows = await apiService.getUserWorkingTimes(uid);
+        const arr = Array.isArray(rows) ? rows : (rows?.data || []);
+        allRows.push(...arr);
+      } catch (e) {}
+    }
+    for (const r of allRows) {
+      const start = r.start_time || r.timestamp || '';
+      const d = start ? new Date(start) : null;
+      if (!d) continue;
+      const mLabel = d.toLocaleString('en-US', { month: 'short' });
+      const m = months.find(x => x.month === mLabel);
+      const hours = Number(r.duration_hours || r.hours || 0) || 0;
+      if (m) {
+        m.totalHours += hours;
+        if (r.overtime) m.overtime += hours;
+      }
+    }
+    workforceAnalytics.value = months.map(m => ({ ...m, efficiency: Math.round(Math.max(70, 90 - (m.overtime / (m.totalHours || 1) * 100 || 0))) }));
+
+  } catch (e) {
+    console.error('Failed to load admin reports', e);
+  }
+};
+
+onMounted(() => {
+  loadAdminReports();
+});
+
+const avgEfficiency = computed(() => {
+  if (!workforceAnalytics.value || workforceAnalytics.value.length === 0) return 0;
+  const sum = workforceAnalytics.value.reduce((s, m) => s + (m.efficiency || 0), 0);
+  return Math.round(sum / workforceAnalytics.value.length) || 0;
+});
 </script>
 
 <template>
@@ -205,7 +296,7 @@ const shiftDistribution = [
             </div>
             <div>
               <p class="text-sm text-muted-foreground">Total Employees</p>
-              <p class="mt-1">108</p>
+              <p class="mt-1">{{ totalEmployees }}</p>
             </div>
           </div>
         </CardContent>
@@ -221,7 +312,7 @@ const shiftDistribution = [
             </div>
             <div>
               <p class="text-sm text-muted-foreground">Monthly Hours</p>
-              <p class="mt-1">8,100</p>
+              <p class="mt-1">{{ monthlyHours }}</p>
             </div>
           </div>
         </CardContent>
@@ -237,7 +328,7 @@ const shiftDistribution = [
             </div>
             <div>
               <p class="text-sm text-muted-foreground">Avg Efficiency</p>
-              <p class="mt-1">92%</p>
+              <p class="mt-1">{{ avgEfficiency }}%</p>
             </div>
           </div>
         </CardContent>
@@ -255,7 +346,7 @@ const shiftDistribution = [
               <p class="text-sm text-muted-foreground">
                 Compliance Issues
               </p>
-              <p class="mt-1">11</p>
+              <p class="mt-1">{{ complianceIssues }}</p>
             </div>
           </div>
         </CardContent>

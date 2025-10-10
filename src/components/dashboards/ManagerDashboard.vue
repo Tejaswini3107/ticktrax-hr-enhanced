@@ -30,31 +30,54 @@ const isAddTeamMemberOpen = ref(false);
 const pendingApprovals = ref([]);
 const teamStats = ref([]);
 const alerts = ref([]);
+const summary = ref({ teamMembers: 0, pendingCount: 0, activeAlerts: 0, teamHours: 0 });
 
 const loadTeamData = async () => {
   try {
     const cur = await authManager.getCurrentUser();
     if (!cur.success) throw new Error('Not signed in');
     const users = await apiService.listUsers();
-    // Basic team stats from users
-    teamStats.value = (Array.isArray(users) ? users : []).slice(0, 6).map(u => ({
-      name: u.attributes?.first_name ? `${u.attributes.first_name} ${u.attributes.last_name}` : (u.name || u.email),
-      hoursWeek: Math.floor(Math.random() * 48),
-      status: Math.random() > 0.1 ? 'On Time' : 'Overtime'
-    }));
 
-    // Gather pending approvals by checking working times for each user (lightweight sample)
+    // Compute team summary and stats from API data
+    const userArray = Array.isArray(users) ? users : [];
+    summary.value.teamMembers = userArray.length;
+
+    const stats = [];
     const approvals = [];
-    for (const u of (Array.isArray(users) ? users : [])) {
+    let totalHours = 0;
+
+    // For each user, fetch recent working times and accumulate
+    for (const u of userArray.slice(0, 20)) { // limit to 20 to avoid heavy loads
       try {
-        const times = await apiService.getUserWorkingTimes(u.id || u.attributes?.id);
-        const pending = (Array.isArray(times) ? times : []).filter(t => t.pending_approval || t.status === 'pending');
-        pending.slice(0,2).forEach(p => approvals.push({ employee: u.attributes?.email || u.email || 'Unknown', date: p.start_time?.split('T')[0] || p.timestamp, hours: p.duration_hours || p.hours || 0, type: p.type || 'Time Entry', reason: p.reason || '-' }));
-      } catch (_) {
-        // ignore per-user failures
+        const userId = u.id || u.attributes?.id;
+        const times = await apiService.getUserWorkingTimes(userId);
+        const timeArray = Array.isArray(times) ? times : [];
+
+        // Sum recent week hours (look at last 7 entries or all if fewer)
+        const recent = timeArray.slice(-7);
+        const hours = recent.reduce((acc, t) => acc + (Number(t.duration_hours || t.hours || 0) || 0), 0);
+        totalHours += hours;
+
+        stats.push({
+          name: u.attributes?.first_name ? `${u.attributes.first_name} ${u.attributes.last_name}` : (u.name || u.email),
+          hoursWeek: Math.round(hours),
+          status: (hours > 50) ? 'Overtime' : 'On Time'
+        });
+
+        // Pending approvals
+        const pending = timeArray.filter(t => t.pending_approval || t.status === 'pending');
+        pending.slice(0,2).forEach(p => approvals.push({ employee: u.attributes?.email || u.email || 'Unknown', date: (p.start_time || p.timestamp || '').split('T')[0] || '-', hours: p.duration_hours || p.hours || 0, type: p.type || 'Time Entry', reason: p.reason || '-' }));
+      } catch (e) {
+        // ignore per-user failures but continue
+        console.warn('failed loading user times', e);
       }
     }
+
+    teamStats.value = stats.slice(0, 6);
     pendingApprovals.value = approvals.slice(0, 10);
+    summary.value.pendingCount = pendingApprovals.value.length;
+    summary.value.teamHours = Math.round(totalHours);
+    summary.value.activeAlerts = alerts.value.length || 0;
   } catch (err) {
       console.warn('Load team data failed', err);
       toast.error('Unable to load team data from server. Some manager features may be unavailable.');
@@ -237,7 +260,7 @@ const handleAddTeamMember = (employee) => {
           <div class="flex items-center justify-between">
             <div>
               <p class="text-sm text-muted-foreground">Team Members</p>
-              <p class="text-2xl mt-1">24</p>
+              <p class="text-2xl mt-1">{{ summary.teamMembers }}</p>
             </div>
             <div class="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
               <Users class="h-6 w-6 text-primary" />
@@ -250,7 +273,7 @@ const handleAddTeamMember = (employee) => {
           <div class="flex items-center justify-between">
             <div>
               <p class="text-sm text-muted-foreground">Pending Approvals</p>
-              <p class="text-2xl mt-1">12</p>
+              <p class="text-2xl mt-1">{{ summary.pendingCount }}</p>
             </div>
             <div class="w-12 h-12 bg-yellow-500/10 rounded-lg flex items-center justify-center">
               <Clock class="h-6 w-6 text-yellow-600 dark:text-yellow-500" />
@@ -263,7 +286,7 @@ const handleAddTeamMember = (employee) => {
           <div class="flex items-center justify-between">
             <div>
               <p class="text-sm text-muted-foreground">Active Alerts</p>
-              <p class="text-2xl mt-1">3</p>
+              <p class="text-2xl mt-1">{{ summary.activeAlerts }}</p>
             </div>
             <div class="w-12 h-12 bg-red-500/10 rounded-lg flex items-center justify-center">
               <AlertTriangle class="h-6 w-6 text-red-600 dark:text-red-500" />
@@ -276,7 +299,7 @@ const handleAddTeamMember = (employee) => {
           <div class="flex items-center justify-between">
             <div>
               <p class="text-sm text-muted-foreground">Team Hours</p>
-              <p class="text-2xl mt-1">952</p>
+              <p class="text-2xl mt-1">{{ summary.teamHours }}</p>
             </div>
             <div class="w-12 h-12 bg-green-500/10 rounded-lg flex items-center justify-center">
               <TrendingUp class="h-6 w-6 text-green-600 dark:text-green-500" />

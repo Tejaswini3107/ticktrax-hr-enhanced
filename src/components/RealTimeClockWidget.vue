@@ -118,6 +118,7 @@
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import realTimeService from '../services/realTimeService.js'
 import authManager from '../services/authService.js'
+import apiService from '../services/apiService.js'
 import { toast } from '../utils/toast.js'
 
 export default {
@@ -222,8 +223,8 @@ export default {
         // Set up event listeners
         setupRealTimeListeners()
         
-        // Load initial data
-        await loadInitialData()
+  // Load initial data from API
+  await loadInitialData()
         
         toast.success('🔴 Live updates enabled')
         
@@ -327,10 +328,35 @@ export default {
           }
         }
         
-        // Send real-time clock in
-        realTimeService.clockIn(location)
-        
-        console.log('✅ Clock in broadcast sent')
+        const user = authManager.currentUser
+        if (!user) throw new Error('User not authenticated')
+
+        // Persist clock in to backend first
+        try {
+          const res = await apiService.clockInOut(user.id, 'in')
+          // If API returns the created entry, use it
+          if (res && (Array.isArray(res) ? res.length > 0 : Object.keys(res).length)) {
+            // Normalize response
+            if (Array.isArray(res)) {
+              activeEntry.value = res.find(r => r.active) || res[0]
+            } else {
+              activeEntry.value = res
+            }
+          } else {
+            // Fallback: set a minimal active entry
+            activeEntry.value = { started_at: new Date().toISOString() }
+          }
+
+          // Broadcast via real-time service so other clients update immediately
+          realTimeService.clockIn(location)
+
+          addActivity('clock_in', `Clocked in at ${formatTime(activeEntry.value.started_at)}`)
+          window.dispatchEvent(new CustomEvent('clock-changed'))
+          toast.success('⏰ Clocked in successfully')
+        } catch (err) {
+          console.error('🔥 API clock in failed:', err)
+          toast.error('Failed to record clock in')
+        }
         
       } catch (error) {
         console.error('🔥 Clock in failed:', error)
@@ -362,10 +388,32 @@ export default {
           }
         }
         
-        // Send real-time clock out
-        realTimeService.clockOut(location)
-        
-        console.log('✅ Clock out broadcast sent')
+        const user = authManager.currentUser
+        if (!user) throw new Error('User not authenticated')
+
+        // Persist clock out to backend
+        try {
+          const res = await apiService.clockInOut(user.id, 'out')
+          // API may return the completed entry
+          if (res && (Array.isArray(res) ? res.length > 0 : Object.keys(res).length)) {
+            // Use response to compute duration message
+            const entry = Array.isArray(res) ? (res[0] || null) : res
+            const duration = entry ? calculateDuration(entry.started_at, entry.ended_at || new Date()) : null
+            addActivity('clock_out', `Clocked out${duration ? ` after ${duration}` : ''}`)
+          } else {
+            addActivity('clock_out', `Clocked out`)
+          }
+
+          // Broadcast via real-time service so other clients update immediately
+          realTimeService.clockOut(location)
+
+          activeEntry.value = null
+          window.dispatchEvent(new CustomEvent('clock-changed'))
+          toast.success('⏰ Clocked out successfully')
+        } catch (err) {
+          console.error('🔥 API clock out failed:', err)
+          toast.error('Failed to record clock out')
+        }
         
       } catch (error) {
         console.error('🔥 Clock out failed:', error)
@@ -382,23 +430,63 @@ export default {
      */
     async function loadInitialData() {
       try {
-        // This would typically load from API
-        // For now, we'll simulate with mock data
-        
-        teamMembers.value = [
-          { id: 1, name: 'Alice Smith', online: true, working: true },
-          { id: 2, name: 'Bob Johnson', online: true, working: false },
-          { id: 3, name: 'Charlie Brown', online: false, working: false }
-        ]
-        
-        recentActivity.value = [
-          {
-            id: 1,
-            type: 'clock_in',
-            message: 'You clocked in',
-            timestamp: new Date(Date.now() - 1000 * 60 * 30) // 30 minutes ago
+        const user = authManager.currentUser
+        if (!user) throw new Error('User not authenticated')
+
+        // Fetch current user's clock (active entry + recent activity)
+        try {
+          const clocks = await apiService.getUserClock(user.id)
+          // API may return array or object; normalize
+          if (Array.isArray(clocks) && clocks.length) {
+            // Find active entry if present
+            const active = clocks.find(c => c.active) || null
+            activeEntry.value = active || null
+            // Map recent activity from clocks
+            recentActivity.value = clocks.slice(0, 10).map(c => ({
+              id: c.id || Date.now() + Math.random(),
+              type: c.active ? 'clock_in' : 'clock_out',
+              message: c.active ? 'You clocked in' : 'You clocked out',
+              timestamp: c.started_at || c.ended_at || new Date()
+            }))
+          } else if (clocks && typeof clocks === 'object') {
+            activeEntry.value = clocks.active ? clocks : null
+            recentActivity.value = clocks.recent || []
+          } else {
+            recentActivity.value = []
           }
-        ]
+        } catch (err) {
+          console.warn('Could not load user clocks:', err)
+          recentActivity.value = []
+        }
+
+        // Fetch team members (best-effort) and infer online/working state
+        try {
+          const users = await apiService.listUsers()
+          // If team scoping is available, filter by user's team_id
+          const teamUsers = users.filter(u => !user.team_id || u.team_id === user.team_id)
+          teamMembers.value = teamUsers.slice(0, 10).map(u => ({
+            id: u.id,
+            name: `${u.first_name || u.name || 'User'}`,
+            online: u.online || false,
+            working: false
+          }))
+
+          // Attempt to mark who is currently working by checking their latest working times (lightweight)
+          for (const member of teamMembers.value.slice(0, 6)) {
+            try {
+              const w = await apiService.getUserWorkingTimes(member.id)
+              // If any entry is currently active or recent, mark working
+              const active = Array.isArray(w) && w.find(e => e.active)
+              member.working = Boolean(active)
+            } catch (_) {
+              // ignore per-user failures
+            }
+          }
+        } catch (err) {
+          console.warn('Could not load team members:', err)
+          // Fallback to empty team
+          teamMembers.value = []
+        }
         
       } catch (error) {
         console.error('🔥 Failed to load initial data:', error)
