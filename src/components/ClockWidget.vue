@@ -6,6 +6,8 @@ import Card from './ui/card.vue';
 import { CardContent, CardHeader, CardTitle } from './ui/card-components.vue';
 import Badge from './ui/badge.vue';
 import LocationTracker from './special/LocationTracker.vue';
+import { apiService } from '../services/apiService.js';
+import authManager from '../services/authService.js';
 
 const props = defineProps({
   showLocation: {
@@ -18,6 +20,7 @@ const status = ref('clocked-out');
 const currentTime = ref(new Date());
 const clockedInTime = ref(null);
 const elapsedTime = ref(0);
+const isProcessing = ref(false);
 
 let timer;
 
@@ -37,16 +40,76 @@ onUnmounted(() => {
   clearInterval(timer);
 });
 
-const handleClockIn = () => {
+// Attempt to load server clock state separately on mount
+onMounted(async () => {
+  try {
+    const res = await authManager.getCurrentUser();
+    const uid = res?.data?.id;
+    if (!uid) return;
+    const clockData = await apiService.getUserClock(uid);
+    const d = Array.isArray(clockData) ? clockData[0] : (clockData || {});
+    const s = d?.status || d?.state || (d?.clock_out ? 'clocked-out' : (d?.clock_in ? 'clocked-in' : null));
+    const ts = d?.clock_in || d?.clocked_in_at || d?.start_time || d?.timestamp || null;
+    if (s === 'clocked-in' || s === 'in' || s === 'active') {
+      status.value = 'clocked-in';
+      if (ts) {
+        const parsed = new Date(ts);
+        if (!isNaN(parsed.getTime())) clockedInTime.value = parsed;
+      }
+    } else {
+      status.value = 'clocked-out';
+    }
+  } catch (e) {
+    console.debug('Could not fetch server clock state', e?.message || e);
+  }
+});
+
+// Backend-backed clock in/out
+const clockIn = async (userId = null) => {
+  if (isProcessing.value) return;
+  isProcessing.value = true;
+  try {
+    let uid = userId;
+    if (!uid) {
+      const res = await authManager.getCurrentUser();
+      uid = res?.data?.id;
+    }
+    if (!uid) throw new Error('No user id');
+    await apiService.clockInOut(uid, 'clocked-in');
   status.value = 'clocked-in';
   clockedInTime.value = new Date();
+  try { window.dispatchEvent(new CustomEvent('clock-changed', { detail: { status: 'clocked-in', userId: uid } })); } catch (e) {}
+  } catch (err) {
+    console.error('Clock in failed', err);
+  } finally {
+    isProcessing.value = false;
+  }
 };
 
-const handleClockOut = () => {
+const clockOut = async (userId = null) => {
+  if (isProcessing.value) return;
+  isProcessing.value = true;
+  try {
+    let uid = userId;
+    if (!uid) {
+      const res = await authManager.getCurrentUser();
+      uid = res?.data?.id;
+    }
+    if (!uid) throw new Error('No user id');
+    await apiService.clockInOut(uid, 'clocked-out');
   status.value = 'clocked-out';
   clockedInTime.value = null;
   elapsedTime.value = 0;
+  try { window.dispatchEvent(new CustomEvent('clock-changed', { detail: { status: 'clocked-out', userId: uid } })); } catch (e) {}
+  } catch (err) {
+    console.error('Clock out failed', err);
+  } finally {
+    isProcessing.value = false;
+  }
 };
+
+const handleClockIn = () => { clockIn(); };
+const handleClockOut = () => { clockOut(); };
 
 const formatTime = (date) => {
   return date.toLocaleTimeString('en-US', {

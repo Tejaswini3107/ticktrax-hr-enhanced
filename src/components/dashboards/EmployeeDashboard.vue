@@ -1,10 +1,10 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import ClockWidget from '../ClockWidget.vue';
 import Card from '../ui/card.vue';
 import { CardContent, CardHeader, CardTitle } from '../ui/card-components.vue';
 import Button from '../ui/button.vue';
-import { Calendar, FileText, AlertCircle, TrendingUp, Download, Building2 } from 'lucide-vue-next';
+import { Calendar, FileText, AlertCircle, TrendingUp, Download, Building2, Play, Square } from 'lucide-vue-next';
 import Badge from '../ui/badge.vue';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table.vue';
 import HelpCenter from '../help/HelpCenter.vue';
@@ -14,6 +14,10 @@ import Schedule from '../Schedule.vue';
 import EmployeeReports from '../EmployeeReports.vue';
 import KioskMode from '../special/KioskMode.vue';
 import { toast } from 'vue-sonner';
+
+import { apiService } from '../../services/apiService.js';
+import authManager from '../../services/authService.js';
+import { onUnmounted } from 'vue';
 
 // Role types removed - using JavaScript
 
@@ -27,17 +31,96 @@ const emit = defineEmits(['update:currentView']);
 const isAddEntryOpen = ref(false);
 const isKioskModeActive = ref(false);
 
-const recentEntries = [
-  { date: "2025-10-01", clockIn: "09:00 AM", clockOut: "05:30 PM", hours: "8.5", status: "approved" },
-  { date: "2025-09-30", clockIn: "08:45 AM", clockOut: "05:15 PM", hours: "8.5", status: "approved" },
-  { date: "2025-09-29", clockIn: "09:15 AM", clockOut: "06:00 PM", hours: "8.75", status: "pending" },
-];
+const recentEntries = ref([]);
+const stats = ref([
+  { label: 'Hours This Week', value: '0', icon: TrendingUp },
+  { label: 'Hours This Month', value: '0', icon: Calendar },
+  { label: 'Pending Entries', value: '0', icon: AlertCircle },
+]);
 
-const stats = [
-  { label: "Hours This Week", value: "40.5", icon: TrendingUp },
-  { label: "Hours This Month", value: "162", icon: Calendar },
-  { label: "Pending Entries", value: "2", icon: AlertCircle },
-];
+const isLoading = ref(false);
+const loadError = ref(null);
+
+// Helper to format a Date (or ISO string) to 'YYYY-MM-DD HH:MM:SS'
+const formatIsoToLocal = (input) => {
+  if (!input && input !== 0) return '';
+  const d = (input instanceof Date) ? input : new Date(input);
+  if (isNaN(d.getTime())) return input || '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+
+const normalizeEntry = (raw) => {
+  const dateRaw = raw.date || raw.start_date || raw.day || '';
+  const clockInRaw = raw.start_time || raw.clock_in || raw.in || '';
+  const clockOutRaw = raw.end_time || raw.clock_out || raw.out || '';
+  const parsedDate = dateRaw ? new Date(dateRaw) : null;
+  const parsedTs = parsedDate && !isNaN(parsedDate.getTime()) ? parsedDate.getTime() : null;
+  const date = parsedTs ? formatIsoToLocal(parsedDate) : (dateRaw || '');
+  const clockIn = (clockInRaw && clockInRaw.includes('T')) ? formatIsoToLocal(clockInRaw) : (clockInRaw || '');
+  const clockOut = (clockOutRaw && clockOutRaw.includes('T')) ? formatIsoToLocal(clockOutRaw) : (clockOutRaw || '');
+  const hours = Number(raw.hours || raw.duration_hours || raw.duration || 0);
+  const status = raw.status || (raw.approved ? 'approved' : raw.pending_approval ? 'pending' : 'pending');
+  return { date, clockIn, clockOut, hours: String(hours), status, _ts: parsedTs };
+};
+
+const computeStats = (entries) => {
+  const now = new Date();
+  const startOfWeek = new Date(now);
+  startOfWeek.setDate(now.getDate() - now.getDay());
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  let weekHours = 0;
+  let monthHours = 0;
+  let pending = 0;
+
+  entries.forEach((e) => {
+    const ts = e._ts || null;
+    const d = ts ? new Date(ts) : new Date(e.date);
+    const h = Number(e.hours) || 0;
+    if (!isNaN(d.getTime())) {
+      if (d >= startOfWeek) weekHours += h;
+      if (d >= startOfMonth) monthHours += h;
+    }
+    if (e.status !== 'approved') pending += 1;
+  });
+
+  stats.value = [
+    { label: 'Hours This Week', value: weekHours.toFixed(2), icon: TrendingUp },
+    { label: 'Hours This Month', value: monthHours.toFixed(2), icon: Calendar },
+    { label: 'Pending Entries', value: String(pending), icon: AlertCircle },
+  ];
+};
+
+const loadDashboard = async () => {
+  isLoading.value = true;
+  loadError.value = null;
+  try {
+    const userRes = await authManager.getCurrentUser();
+    const user = userRes?.data;
+    if (!user || !user.id) throw new Error('No authenticated user');
+    const data = await apiService.getUserWorkingTimes(user.id);
+    const entries = Array.isArray(data) ? data : (data?.data || []);
+    const normalized = entries.map(normalizeEntry).sort((a,b) => (a.date < b.date ? 1 : -1));
+    recentEntries.value = normalized.slice(0, 10);
+    computeStats(normalized);
+  } catch (err) {
+    console.error('Load dashboard failed', err);
+    loadError.value = err.message || String(err);
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+onMounted(() => {
+  loadDashboard();
+  // Listen for clock changes from ClockWidget and refresh
+  const onClockChanged = () => { loadDashboard(); };
+  window.addEventListener('clock-changed', onClockChanged);
+  onUnmounted(() => {
+    try { window.removeEventListener('clock-changed', onClockChanged); } catch (e) {}
+  });
+});
 
 const handleLaunchKiosk = () => {
   isKioskModeActive.value = true;
@@ -47,6 +130,44 @@ const handleLaunchKiosk = () => {
 const handleExitKiosk = () => {
   isKioskModeActive.value = false;
   toast.success("Exited warehouse kiosk mode");
+};
+
+// Clock actions (call backend similar to ClockWidget)
+const isProcessingClock = ref(false);
+const clockIn = async () => {
+  if (isProcessingClock.value) return;
+  isProcessingClock.value = true;
+  try {
+    const res = await authManager.getCurrentUser();
+    const uid = res?.data?.id;
+    if (!uid) throw new Error('No user id');
+    await apiService.clockInOut(uid, 'clocked-in');
+    toast.success('Clocked in successfully');
+    await loadDashboard();
+  } catch (err) {
+    console.error('Clock in failed', err);
+    toast.error(err?.message || 'Clock in failed');
+  } finally {
+    isProcessingClock.value = false;
+  }
+};
+
+const clockOut = async () => {
+  if (isProcessingClock.value) return;
+  isProcessingClock.value = true;
+  try {
+    const res = await authManager.getCurrentUser();
+    const uid = res?.data?.id;
+    if (!uid) throw new Error('No user id');
+    await apiService.clockInOut(uid, 'clocked-out');
+    toast.success('Clocked out successfully');
+    await loadDashboard();
+  } catch (err) {
+    console.error('Clock out failed', err);
+    toast.error(err?.message || 'Clock out failed');
+  } finally {
+    isProcessingClock.value = false;
+  }
 };
 </script>
 
@@ -111,6 +232,14 @@ const handleExitKiosk = () => {
                 <TrendingUp class="h-6 w-6" />
                 View Reports
               </Button>
+              <!-- <Button variant="outline" class="h-20 flex flex-col gap-2" @click="clockIn">
+                <Play class="h-6 w-6" />
+                Clock In
+              </Button>
+              <Button variant="outline" class="h-20 flex flex-col gap-2" @click="clockOut">
+                <Square class="h-6 w-6" />
+                Clock Out
+              </Button> -->
               <Button variant="outline" class="h-20 flex flex-col gap-2 border-primary/20 hover:border-primary/40 hover:bg-primary/5" @click="handleLaunchKiosk">
                 <Building2 class="h-6 w-6 text-primary" />
                 <span class="text-primary">Kiosk Mode</span>
@@ -129,7 +258,7 @@ const handleExitKiosk = () => {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Date</TableHead>
+              <!-- <TableHead>Date</TableHead> -->
               <TableHead>Clock In</TableHead>
               <TableHead>Clock Out</TableHead>
               <TableHead>Hours</TableHead>
@@ -138,7 +267,7 @@ const handleExitKiosk = () => {
           </TableHeader>
           <TableBody>
             <TableRow v-for="(entry, index) in recentEntries" :key="index">
-              <TableCell>{{ entry.date }}</TableCell>
+              <!-- <TableCell>{{ entry.date }}</TableCell> -->
               <TableCell>{{ entry.clockIn }}</TableCell>
               <TableCell>{{ entry.clockOut }}</TableCell>
               <TableCell>{{ entry.hours }}</TableCell>
