@@ -48,7 +48,10 @@ class GothamApiService {
       }
       const method = (options.method || 'GET').toUpperCase();
       // Send XSRF token only for state-changing requests to avoid CORS preflight rejections
-      if (this.xsrfToken && method !== 'GET') {
+      // Avoid sending XSRF token for auth endpoints (sign_in/sign_up) because some backends
+      // do not allow custom CSRF headers on those endpoints and that triggers CORS preflight failures.
+      const isAuthEndpoint = endpoint.includes('/sign_in') || endpoint.includes('/sign_up');
+      if (this.xsrfToken && method !== 'GET' && !isAuthEndpoint) {
         headers[API_CONFIG.HEADERS.CSRF_TOKEN] = this.xsrfToken;
       }
 

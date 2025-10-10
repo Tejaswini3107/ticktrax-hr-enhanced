@@ -3,6 +3,7 @@ import authManager from '../services/authService.js'
 
 // Import components
 import LoginScreen from '../components/auth/LoginScreen.vue'
+import LandingPage from '../components/LandingPage.vue'
 import DashboardLayout from '../components/DashboardLayout.vue'
 import EmployeeDashboard from '../components/dashboards/EmployeeDashboard.vue'
 import ManagerDashboard from '../components/dashboards/ManagerDashboard.vue'
@@ -13,7 +14,24 @@ import ProfileDialog from '../components/dialogs/ProfileDialog.vue'
 const routes = [
   {
     path: '/',
-    redirect: '/dashboard'
+    name: 'Landing',
+    component: LandingPage,
+    meta: {
+      requiresAuth: false,
+      title: 'Welcome - TickTrax'
+    }
+    ,
+    beforeEnter: (to, from, next) => {
+      try {
+        if (authManager.isAuthenticated()) {
+          next('/dashboard')
+          return
+        }
+      } catch (e) {
+        // ignore and allow
+      }
+      next()
+    }
   },
   {
     path: '/login',
@@ -22,6 +40,18 @@ const routes = [
     meta: { 
       requiresAuth: false,
       title: 'Login - TickTrax'
+    }
+    ,
+    beforeEnter: (to, from, next) => {
+      try {
+        if (authManager.isAuthenticated()) {
+          next('/dashboard')
+          return
+        }
+      } catch (e) {
+        // ignore and allow
+      }
+      next()
     }
   },
   {
@@ -170,7 +200,8 @@ router.beforeEach(async (to, from, next) => {
     }
   } else {
     // Public route - check if already authenticated and trying to access login
-    if (to.path === '/login') {
+    // If user is authenticated and tries to visit public routes like '/' or '/login', send to dashboard
+    if (to.path === '/login' || to.path === '/') {
       try {
         const isAuthenticated = await authManager.isAuthenticated()
         if (isAuthenticated) {

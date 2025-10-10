@@ -1,6 +1,8 @@
 // API Configuration aligned with provided Postman collection
 export const API_CONFIG = {
-  BASE_URL: import.meta.env.VITE_API_BASE_URL || 'https://batman-api-a20b3a37aa3c.herokuapp.com/api',
+  // In development prefer a relative '/api' so Vite dev server proxy forwards requests and avoids CORS.
+  // In production use the real backend URL.
+  BASE_URL: import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? '/api' : 'https://batman-api-a20b3a37aa3c.herokuapp.com/api'),
   ENDPOINTS: {
     AUTH: {
       SIGN_UP: '/sign_up',                 // POST

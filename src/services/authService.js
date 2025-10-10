@@ -69,7 +69,53 @@ class AuthTokenManager {
 
   // Check if user is authenticated
   isAuthenticated() {
-    return apiService.isAuthenticated();
+    // Prefer server-backed jwt token
+    try {
+      if (apiService && typeof apiService.isAuthenticated === 'function') {
+        const apiAuth = apiService.isAuthenticated();
+        if (apiAuth) return true;
+      }
+    } catch (e) {
+      // ignore and fall back to local data
+    }
+
+    // Fallback: if we have stored user data, treat as authenticated for UI routing
+    try {
+      return Boolean(localStorage.getItem('user_data')) || false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Get current user in a router-friendly shape { success, data }
+  async getCurrentUser() {
+    try {
+      // Prefer calling API if available
+      if (typeof apiService.getCurrentUser === 'function') {
+        const res = await apiService.getCurrentUser();
+        // If API returns an object with success/data, forward it
+        if (res && (res.success || res.data)) {
+          const data = res.data || res;
+          try { localStorage.setItem('user_data', JSON.stringify(data)); } catch (e) {}
+          return { success: true, data };
+        }
+      }
+
+      // Fallback - return stored user data from login
+      const storedUser = localStorage.getItem('user_data');
+      if (storedUser) {
+        return { success: true, data: JSON.parse(storedUser) };
+      }
+
+      return { success: false, error: 'No user data available' };
+    } catch (error) {
+      console.error('getCurrentUser failed:', error);
+      const storedUser = localStorage.getItem('user_data');
+      if (storedUser) {
+        return { success: true, data: JSON.parse(storedUser) };
+      }
+      return { success: false, error: error.message };
+    }
   }
 
   // Get user profile
