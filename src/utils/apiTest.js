@@ -7,8 +7,8 @@ export const testAPIConnection = async () => {
   console.log('🔍 Testing API connection...');
   
   try {
-    // Test if we can reach the backend
-    const response = await fetch(`${API_CONFIG.BASE_URL}/login`, {
+    // Test if we can reach the backend via sign_in (expected 401 without valid creds)
+    const response = await fetch(`${API_CONFIG.BASE_URL}/sign_in`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: 'test', password: 'test' })
@@ -36,30 +36,37 @@ export const testAuthEndpoints = async () => {
   console.log('🔐 Testing authentication endpoints...');
   
   try {
-    // Test login endpoint
-    const loginResponse = await fetch(`${API_CONFIG.BASE_URL}/login`, {
+    // Test sign_in with known demo credentials
+    const loginResponse = await fetch(`${API_CONFIG.BASE_URL}/sign_in`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        email: 'test@example.com',
-        password: 'test'
+        email: 'xinxin@example.com',
+        password: 'xinxin123'
       })
     });
     
     console.log('Login endpoint status:', loginResponse.status);
-    
-    // Test users endpoint (should fail without auth)
-    const usersResponse = await fetch(`${API_CONFIG.BASE_URL}/users`, {
-      method: 'GET'
-    });
-    
-    console.log('Users endpoint status:', usersResponse.status);
+    let usersStatus = 'n/a';
+    if (loginResponse.ok) {
+      const loginData = await loginResponse.json();
+      const token = loginData?.meta?.token;
+      // Intentionally omit CSRF header for GET to avoid CORS preflight blocks
+      const usersResponse = await fetch(`${API_CONFIG.BASE_URL}/users`, {
+        method: 'GET',
+        headers: {
+          Authorization: token ? `Bearer ${token}` : ''
+        }
+      });
+      usersStatus = usersResponse.status;
+      console.log('Users endpoint status:', usersStatus);
+    }
     
     return {
       login: loginResponse.status,
-      users: usersResponse.status
+      users: usersStatus
     };
   } catch (error) {
     if (error.message.includes('CORS') || error.message.includes('blocked')) {

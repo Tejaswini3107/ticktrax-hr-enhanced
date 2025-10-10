@@ -1,5 +1,4 @@
 import apiService from './apiService.js';
-import { mockApiService } from './mockApiService.js';
 
 // Token Manager Class
 class AuthTokenManager {
@@ -10,56 +9,37 @@ class AuthTokenManager {
   // Login and store tokens
   async login(emailOrUsername, password) {
     try {
-      // Determine if it's email or username
-      const credentials = emailOrUsername.includes('@') 
-        ? { email: emailOrUsername, password }
-        : { username: emailOrUsername, password };
+      // Use email-only sign in
+      const credentials = { email: emailOrUsername, password };
 
-      let result;
-      try {
-        result = await apiService.login(credentials);
-      } catch (apiError) {
-        console.warn('API not available, using mock data:', apiError.message);
-        result = await mockApiService.login(credentials);
-      }
-      if (result && result.success) {
-        this.csrfToken = apiService.xsrfToken;
+      // Always use real API
+      const result = await apiService.signIn(credentials);
 
-        // Normalize user object across API and mock responses
-        let user = null;
-        let token = null;
+      // Treat presence of data/meta as success for real API
+      if (result && result.data && result.meta) {
+        const attributes = result.data.attributes || {};
+        const user = {
+          id: result.data.id || attributes.id || null,
+          email: attributes.email || null,
+          role: (attributes.role || 'employee').toLowerCase(),
+          first_name: attributes.first_name || '',
+          last_name: attributes.last_name || ''
+        };
 
-        if (result.data) {
-          // Mock API returns data.user, real API returns flattened fields in data
-          if (result.data.user) {
-            user = result.data.user;
-            token = result.data.token || null;
-          } else {
-            user = {
-              id: result.data.id || result.data.user_id || null,
-              email: result.data.email || null,
-              role: result.data.role || 'employee',
-              first_name: result.data.first_name || result.data.firstName || '',
-              last_name: result.data.last_name || result.data.lastName || ''
-            };
-            token = result.data.token || null;
-          }
-        }
+        const token = result?.meta?.token || null;
+        const csrf = result?.meta?.csrf_token || null;
+        this.csrfToken = csrf;
 
-        // Persist normalized user data for later lookup
         if (user) {
           localStorage.setItem('user_data', JSON.stringify(user));
         }
 
-        if (token) {
-          // Keep JWT token in apiService storage as well
-          apiService.setTokens(token, apiService.xsrfToken || null);
-        }
-
+        apiService.setTokens(token || null, csrf || null);
         return { success: true, user, token };
       }
 
-      return result;
+      // Fallback: if API returned a structured error
+      return { success: false, error: result?.error || result?.message || 'Login failed' };
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -73,7 +53,7 @@ class AuthTokenManager {
   // Logout
   async logout() {
     try {
-      const result = await apiService.logout();
+      const result = await apiService.signOut();
       this.csrfToken = null;
       // Clear stored user data
       localStorage.removeItem('user_data');

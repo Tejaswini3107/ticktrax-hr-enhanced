@@ -57,8 +57,9 @@ const roleConfig = {
   },
 };
 
-const config = computed(() => roleConfig[props.currentRole]);
-const Icon = computed(() => config.value.icon);
+const normalizedRole = computed(() => (props.currentRole || 'employee').toString().toLowerCase());
+const config = computed(() => roleConfig[normalizedRole.value] || roleConfig.employee);
+const Icon = computed(() => (config.value && config.value.icon) ? config.value.icon : Clock);
 </script>
 
 <template>

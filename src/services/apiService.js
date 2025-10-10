@@ -1,32 +1,104 @@
-// Gotham API Service - Simple integration without authentication complexity
+// Gotham API Service - Real API integration aligned with Postman collection
 import { API_CONFIG } from '../config/api.js';
 
 class GothamApiService {
   constructor() {
-    this.baseURL = API_CONFIG.BASE_URL || 'http://localhost:3000'; // Gotham API base URL
+    this.baseURL = API_CONFIG.BASE_URL || 'http://localhost:4000/api';
+    this.jwtToken = null;
+    this.xsrfToken = null;
   }
 
-  // Generic request method
+  // Token management
+  initializeTokens() {
+    this.jwtToken = localStorage.getItem('jwt_token');
+    this.xsrfToken = localStorage.getItem('xsrf_token');
+  }
+
+  setTokens(jwtToken, xsrfToken) {
+    this.jwtToken = jwtToken;
+    this.xsrfToken = xsrfToken;
+    if (jwtToken) localStorage.setItem('jwt_token', jwtToken);
+    if (xsrfToken) localStorage.setItem('xsrf_token', xsrfToken);
+  }
+
+  clearTokens() {
+    this.jwtToken = null;
+    this.xsrfToken = null;
+    localStorage.removeItem('jwt_token');
+    localStorage.removeItem('xsrf_token');
+  }
+
+  isAuthenticated() {
+    this.initializeTokens();
+    return Boolean(this.jwtToken);
+  }
+
+  // Generic request method with auth headers and empty-state normalization
   async request(endpoint, options = {}) {
     try {
       const url = `${this.baseURL}${endpoint}`;
-      const config = {
-        headers: {
+      const headers = {
           'Content-Type': 'application/json',
-        },
-        ...options,
+        'Accept': 'application/json'
       };
+
+      this.initializeTokens();
+      if (this.jwtToken) {
+        headers[API_CONFIG.HEADERS.AUTHORIZATION] = `Bearer ${this.jwtToken}`;
+      }
+      const method = (options.method || 'GET').toUpperCase();
+      // Send XSRF token only for state-changing requests to avoid CORS preflight rejections
+      if (this.xsrfToken && method !== 'GET') {
+        headers[API_CONFIG.HEADERS.CSRF_TOKEN] = this.xsrfToken;
+      }
+
+      const config = { headers, ...options };
 
       console.log(`API Request: ${config.method || 'GET'} ${url}`);
       
       const response = await fetch(url, config);
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        let message = `HTTP error! status: ${response.status}`;
+        try {
+          const errJson = await response.json();
+          const apiMsg = errJson?.error || errJson?.message || (Array.isArray(errJson?.errors) ? errJson.errors.join(', ') : null);
+          if (apiMsg) message = `${response.status} ${apiMsg}`;
+        } catch (_) {}
+        throw new Error(message);
+      }
+      
+      // Handle 204 No Content
+      if (response.status === 204) {
+        return { success: true };
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      const contentLength = Number(response.headers.get('content-length') || 0);
+
+      // If not JSON or empty body, try text and return {}
+      if (!contentType.toLowerCase().includes('json') || contentLength === 0) {
+        const text = await response.text();
+        if (!text) return {};
+        try {
+          const parsed = JSON.parse(text);
+          console.log('API Response:', parsed);
+          return parsed;
+        } catch (_) {
+          // Return as raw text when backend doesn't send JSON
+          console.log('API Response (text):', text);
+          return { message: text };
+        }
       }
       
       const data = await response.json();
       console.log('API Response:', data);
+
+      // Normalize empty collections to [] for UI "No data" states
+      if (data == null) return [];
+      if (Array.isArray(data)) return data;
+      if (data.data && Array.isArray(data.data)) return data.data;
+      if (data.items && Array.isArray(data.items)) return data.items;
       return data;
     } catch (error) {
       console.error('API Error:', error);
@@ -34,260 +106,164 @@ class GothamApiService {
     }
   }
 
-  // Authentication endpoints (simplified - no token management)
-  async signIn(email, password) {
-    return this.request('/auth/sign_in', {
+  // Authentication aligned with Postman collection
+  async signUp(payload) {
+    const result = await this.request(API_CONFIG.ENDPOINTS.AUTH.SIGN_UP, {
       method: 'POST',
-      body: JSON.stringify({ email, password })
+      body: JSON.stringify(payload)
     });
+    // Extract token from meta.token when present
+    const token = result?.meta?.token || null;
+    if (token) this.setTokens(token, result?.meta?.csrf_token || null);
+    return result;
   }
 
-  async signUp(userData) {
-    return this.request('/auth/sign_up', {
+  async signIn(credentials) {
+    const result = await this.request(API_CONFIG.ENDPOINTS.AUTH.SIGN_IN, {
       method: 'POST',
-      body: JSON.stringify(userData)
+      body: JSON.stringify(credentials)
     });
+    const token = result?.meta?.token || null;
+    const csrf = result?.meta?.csrf_token || null;
+    if (token) this.setTokens(token, csrf);
+    return result;
   }
 
   async signOut() {
-    return this.request('/auth/sign_out', {
-      method: 'POST'
-    });
-  }
-
-  // User management
-  async getCurrentUser() {
-    return this.request('/users/current');
-  }
-
-  async updateUser(userData) {
-    return this.request('/users/current', {
-      method: 'PUT',
-      body: JSON.stringify(userData)
-    });
-  }
-
-  async getAllUsers() {
-    return this.request('/users');
-  }
-
-  async getUser(userId) {
-    return this.request(`/users/${userId}`);
-  }
-
-  async createUser(userData) {
-    return this.request('/users', {
-      method: 'POST',
-      body: JSON.stringify(userData)
-    });
-  }
-
-  async updateUserById(userId, userData) {
-    return this.request(`/users/${userId}`, {
-      method: 'PUT',
-      body: JSON.stringify(userData)
-    });
-  }
-
-  async deleteUser(userId) {
-    return this.request(`/users/${userId}`, {
+    const res = await this.request(API_CONFIG.ENDPOINTS.AUTH.SIGN_OUT, {
       method: 'DELETE'
     });
+    this.clearTokens();
+    return res;
   }
 
-  // Time tracking
-  async clockIn(userId) {
-    return this.request('/time_tracking/clock_in', {
-      method: 'POST',
-      body: JSON.stringify({ user_id: userId })
-    });
+  // Users & Permissions
+  async listUsers() {
+    const data = await this.request(API_CONFIG.ENDPOINTS.USERS.LIST);
+    return Array.isArray(data) ? data : (data?.data || []);
   }
 
-  async clockOut(userId) {
-    return this.request('/time_tracking/clock_out', {
-      method: 'POST',
-      body: JSON.stringify({ user_id: userId })
-    });
+  async getUserById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.USERS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
   }
 
-  async getTimeEntries(params = {}) {
-    const queryString = new URLSearchParams(params).toString();
-    const endpoint = queryString ? `/time_tracking/entries?${queryString}` : '/time_tracking/entries';
-    return this.request(endpoint);
+  async listRoles() {
+    const data = await this.request(API_CONFIG.ENDPOINTS.ROLES.LIST);
+    return Array.isArray(data) ? data : (data?.data || []);
   }
 
-  async getTimeEntry(entryId) {
-    return this.request(`/time_tracking/entries/${entryId}`);
+  async updateUserPermissions(userId, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.PERMISSIONS.UPDATE.replace(':user_id', String(userId));
+    return await this.request(endpoint, { method: 'PUT', body: JSON.stringify(payload) });
   }
 
-  async createTimeEntry(entryData) {
-    return this.request('/time_tracking/entries', {
-      method: 'POST',
-      body: JSON.stringify(entryData)
-    });
+  // Time Tracking
+  async getUserClock(userID) {
+    const endpoint = API_CONFIG.ENDPOINTS.CLOCKS.BY_USER.replace(':userID', String(userID));
+    return await this.request(endpoint);
   }
 
-  async updateTimeEntry(entryId, entryData) {
-    return this.request(`/time_tracking/entries/${entryId}`, {
-      method: 'PUT',
-      body: JSON.stringify(entryData)
-    });
+  async clockInOut(userID, status) {
+    const endpoint = API_CONFIG.ENDPOINTS.CLOCKS.BY_USER.replace(':userID', String(userID));
+    return await this.request(endpoint, { method: 'POST', body: JSON.stringify({ status }) });
+    }
+
+  async getUserWorkingTimes(userID) {
+    const endpoint = API_CONFIG.ENDPOINTS.WORKINGTIME.BY_USER.replace(':userID', String(userID));
+    const data = await this.request(endpoint);
+    return Array.isArray(data) ? data : (data?.data || []);
   }
 
-  async deleteTimeEntry(entryId) {
-    return this.request(`/time_tracking/entries/${entryId}`, {
-      method: 'DELETE'
-    });
+  async logUnpaidOvertime(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.LOGS.UNPAID_OVERTIME, { method: 'POST', body: JSON.stringify(payload) });
   }
 
-  async getCurrentStatus(userId) {
-    return this.request(`/time_tracking/current_status/${userId}`);
+  // Schedules & Shifts
+  async getEmployeeScheduleConstraints(employee_id) {
+    const endpoint = API_CONFIG.ENDPOINTS.SCHEDULES.CONSTRAINTS.replace(':employee_id', String(employee_id));
+    return await this.request(endpoint);
   }
 
-  async getTimeReport(params = {}) {
-    const queryString = new URLSearchParams(params).toString();
-    const endpoint = queryString ? `/time_tracking/report?${queryString}` : '/time_tracking/report';
-    return this.request(endpoint);
+  async createBatchSchedules(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.SCHEDULES.CREATE_BATCH, { method: 'POST', body: JSON.stringify(payload) });
   }
 
-  // Schedule management
-  async getSchedules(params = {}) {
-    const queryString = new URLSearchParams(params).toString();
-    const endpoint = queryString ? `/schedules?${queryString}` : '/schedules';
-    return this.request(endpoint);
+  // Tasks & Skills
+  async listTasks() {
+    const data = await this.request(API_CONFIG.ENDPOINTS.TASKS.LIST);
+    return Array.isArray(data) ? data : (data?.data || []);
   }
 
-  async getSchedule(scheduleId) {
-    return this.request(`/schedules/${scheduleId}`);
+  async createTask(task) {
+    return await this.request(API_CONFIG.ENDPOINTS.TASKS.CREATE, { method: 'POST', body: JSON.stringify({ task }) });
   }
 
-  async createSchedule(scheduleData) {
-    return this.request('/schedules', {
-      method: 'POST',
-      body: JSON.stringify(scheduleData)
-    });
+  async updateTaskStatus(taskid, status) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.UPDATE_STATUS.replace(':taskid', String(taskid));
+    return await this.request(endpoint, { method: 'PUT', body: JSON.stringify({ status }) });
   }
 
-  async updateSchedule(scheduleId, scheduleData) {
-    return this.request(`/schedules/${scheduleId}`, {
-      method: 'PUT',
-      body: JSON.stringify(scheduleData)
-    });
+  async assignTaskToUser(taskid, userid, assignment) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.ASSIGN_TO_USER
+      .replace(':taskid', String(taskid))
+      .replace(':userid', String(userid));
+    return await this.request(endpoint, { method: 'POST', body: JSON.stringify({ assignment }) });
   }
 
-  async deleteSchedule(scheduleId) {
-    return this.request(`/schedules/${scheduleId}`, {
-      method: 'DELETE'
-    });
+  async listSkills() {
+    const data = await this.request(API_CONFIG.ENDPOINTS.SKILLS.LIST);
+    return Array.isArray(data) ? data : (data?.data || []);
   }
 
-  // Task management
-  async getTasks(params = {}) {
-    const queryString = new URLSearchParams(params).toString();
-    const endpoint = queryString ? `/tasks?${queryString}` : '/tasks';
-    return this.request(endpoint);
+  async assignSkillToUser(userid, skillid, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.SKILLS.ASSIGN_TO_USER
+      .replace(':userid', String(userid))
+      .replace(':skillid', String(skillid));
+    return await this.request(endpoint, { method: 'POST', body: JSON.stringify(payload) });
   }
 
-  async getTask(taskId) {
-    return this.request(`/tasks/${taskId}`);
+  async addNewSkill(label) {
+    return await this.request(API_CONFIG.ENDPOINTS.SKILLS.CREATE, { method: 'POST', body: JSON.stringify({ label }) });
   }
 
-  async createTask(taskData) {
-    return this.request('/tasks', {
-      method: 'POST',
-      body: JSON.stringify(taskData)
-    });
+  // Payroll & Audit
+  async getCalculationRates() {
+    return await this.request(API_CONFIG.ENDPOINTS.PAYROLL.CALCULATION_RATES);
   }
 
-  async updateTask(taskId, taskData) {
-    return this.request(`/tasks/${taskId}`, {
-      method: 'PUT',
-      body: JSON.stringify(taskData)
-    });
+  async getPayrollReport(id, query = {}) {
+    const endpointBase = API_CONFIG.ENDPOINTS.PAYROLL.REPORT_BY_ID.replace(':id', String(id));
+    const qs = new URLSearchParams(query).toString();
+    return await this.request(qs ? `${endpointBase}?${qs}` : endpointBase);
   }
 
-  async deleteTask(taskId) {
-    return this.request(`/tasks/${taskId}`, {
-      method: 'DELETE'
-    });
+  async validateTimesheet(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.TIMESHEETS.VALIDATE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'PUT', body: JSON.stringify(payload) });
   }
 
-  // Payroll
-  async getPayrollPeriods(params = {}) {
-    const queryString = new URLSearchParams(params).toString();
-    const endpoint = queryString ? `/payroll/periods?${queryString}` : '/payroll/periods';
-    return this.request(endpoint);
+  async resolveDiscrepancy(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.AUDIT.RESOLVE_DISCREPANCY, { method: 'POST', body: JSON.stringify(payload) });
   }
 
-  async getPayrollPeriod(periodId) {
-    return this.request(`/payroll/periods/${periodId}`);
+  async presenceVerification() {
+    return await this.request(API_CONFIG.ENDPOINTS.AUDIT.PRESENCE_VERIFICATION);
   }
 
-  async createPayrollPeriod(periodData) {
-    return this.request('/payroll/periods', {
-      method: 'POST',
-      body: JSON.stringify(periodData)
-    });
-  }
-
-  async updatePayrollPeriod(periodId, periodData) {
-    return this.request(`/payroll/periods/${periodId}`, {
-      method: 'PUT',
-      body: JSON.stringify(periodData)
-    });
-  }
-
-  async deletePayrollPeriod(periodId) {
-    return this.request(`/payroll/periods/${periodId}`, {
-      method: 'DELETE'
-    });
-  }
-
-  async calculatePayroll(periodId) {
-    return this.request(`/payroll/calculate/${periodId}`, {
-      method: 'POST'
-    });
+  async nightShiftAlert() {
+    return await this.request(API_CONFIG.ENDPOINTS.AUDIT.NIGHT_SHIFT_ALERT);
   }
 
   // Integrations
-  async getIntegrations() {
-    return this.request('/integrations');
+  async batsignalIntegration(signal) {
+    return await this.request(API_CONFIG.ENDPOINTS.INTEGRATIONS.BATSIGNAL, { method: 'POST', body: JSON.stringify({ signal }) });
   }
 
-  async getIntegration(integrationId) {
-    return this.request(`/integrations/${integrationId}`);
-  }
-
-  async createIntegration(integrationData) {
-    return this.request('/integrations', {
-      method: 'POST',
-      body: JSON.stringify(integrationData)
-    });
-  }
-
-  async updateIntegration(integrationId, integrationData) {
-    return this.request(`/integrations/${integrationId}`, {
-      method: 'PUT',
-      body: JSON.stringify(integrationData)
-    });
-  }
-
-  async deleteIntegration(integrationId) {
-    return this.request(`/integrations/${integrationId}`, {
-      method: 'DELETE'
-    });
-  }
-
-  async testIntegration(integrationId) {
-    return this.request(`/integrations/${integrationId}/test`, {
-      method: 'POST'
-    });
-  }
-
-  async syncIntegration(integrationId) {
-    return this.request(`/integrations/${integrationId}/sync`, {
-      method: 'POST'
-    });
+  async listIntegrations(query = {}) {
+    const qs = new URLSearchParams(query).toString();
+    const base = API_CONFIG.ENDPOINTS.INTEGRATIONS.LIST;
+    return await this.request(qs ? `${base}?${qs}` : base);
   }
 }
 
