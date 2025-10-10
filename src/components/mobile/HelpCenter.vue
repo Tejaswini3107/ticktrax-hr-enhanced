@@ -32,10 +32,11 @@
 import Card from '../ui/card.vue';
 import { CardContent } from '../ui/card-components.vue';
 import Button from '../ui/button.vue';
+import toast from '../../utils/toast.js';
 
 const contactSupport = () => {
   // This is a stub — in the real app you might open an email client or support chat
-  alert('Opening support channel (demo)');
+  toast.info('Opening support channel...');
 };
 </script>
 

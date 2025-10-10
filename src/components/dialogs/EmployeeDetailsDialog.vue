@@ -298,36 +298,7 @@ export default {
   },
   data() {
     return {
-      recentTimeEntries: [
-        {
-          date: '2025-10-01',
-          clockIn: '08:00 AM',
-          clockOut: '05:00 PM',
-          hours: 9.0,
-          status: 'approved',
-        },
-        {
-          date: '2025-09-30',
-          clockIn: '08:15 AM',
-          clockOut: '05:30 PM',
-          hours: 9.25,
-          status: 'approved',
-        },
-        {
-          date: '2025-09-29',
-          clockIn: '08:00 AM',
-          clockOut: '05:00 PM',
-          hours: 9.0,
-          status: 'approved',
-        },
-        {
-          date: '2025-09-28',
-          clockIn: '08:30 AM',
-          clockOut: '05:15 PM',
-          hours: 8.75,
-          status: 'approved',
-        },
-      ],
+      recentTimeEntries: [],
     };
   },
   computed: {
@@ -351,6 +322,38 @@ export default {
     onOpenChange(open) {
       this.$emit('update:open', open);
     },
+    async loadRecentEntries() {
+      try {
+        if (!this.employee || !this.employee.id) return;
+        const api = await import('../../services/apiService.js');
+        const data = await api.default.getUserWorkingTimes(this.employee.id);
+        this.recentTimeEntries = (Array.isArray(data) ? data : (data?.data || [])).map(r => ({
+          date: r.start_time ? r.start_time.split('T')[0] : (r.timestamp || ''),
+          clockIn: r.clock_in || r.start_time || '',
+          clockOut: r.clock_out || r.end_time || '',
+          hours: r.duration_hours || r.hours || 0,
+          status: r.status || (r.approved ? 'approved' : 'pending')
+        }));
+      } catch (err) {
+        console.warn('Failed to load employee entries', err);
+        const toastModule = await import('../../utils/toast.js');
+        toastModule.default.error('Failed to load recent entries');
+        // keep existing empty list or fallback
+      }
+    }
+  },
+  watch: {
+    employee: {
+      immediate: true,
+      handler(newVal) {
+        if (newVal && this.open) {
+          this.loadRecentEntries();
+        }
+      }
+    },
+    open(val) {
+      if (val && this.employee) this.loadRecentEntries();
+    }
   },
 };
 </script>

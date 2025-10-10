@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import Card from './ui/card.vue';
 import { CardContent, CardHeader, CardTitle } from './ui/card-components.vue';
 import Button from './ui/button.vue';
@@ -50,121 +50,75 @@ import {
   FileText,
   Target,
 } from 'lucide-vue-next';
-import { useToast } from './ui/toast/use-toast.js';
-
-const { toast } = useToast();
+// using the local toast utility
 
 const selectedPeriod = ref('month');
 const startDate = ref('');
 const endDate = ref('');
 
 // Mock data for charts
-const weeklyHoursData = {
-  labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
-  datasets: [
-    {
-      label: 'Regular Hours',
-      data: [42, 40, 45, 38],
-      backgroundColor: '#3b82f6',
-    },
-    {
-      label: 'Overtime',
-      data: [2, 0, 5, 0],
-      backgroundColor: '#f59e0b',
-    },
-  ],
-};
+import apiService from '../services/apiService.js';
+import authManager from '../services/authService.js';
+import toast from '../utils/toast.js';
 
-const projectHoursData = {
-  labels: ['Alpha', 'Beta', 'Gamma', 'Delta'],
-  datasets: [
-    {
-      label: 'Hours',
-      data: [45, 32, 28, 23],
-      backgroundColor: ['#3b82f6', '#8b5cf6', '#06b6d4', '#10b981'],
-    },
-  ],
-};
+const weeklyHoursData = ref({ labels: [], datasets: [] });
+const projectHoursData = ref({ labels: [], datasets: [] });
+const workLocationData = ref({ labels: [], datasets: [] });
+const monthlyTrendsData = ref({ labels: [], datasets: [] });
+const pieChartColors = ['#3b82f6', '#8b5cf6', '#06b6d4', '#10b981'];
 
-const workLocationData = {
-  labels: ['Work from Home', 'WFO', 'Field Work', 'Warehouse Visit'],
-  datasets: [
-    {
-      label: 'Hours',
-      data: [58, 39, 26, 6],
-      backgroundColor: ['#3b82f6', '#8b5cf6', '#06b6d4', '#10b981'],
-    },
-  ],
-};
+const summaryStats = ref({
+  totalHours: 0,
+  regularHours: 0,
+  overtimeHours: 0,
+  averageDaily: 0,
+  punctualityScore: 0,
+  projectsWorked: 0,
+});
 
-const monthlyTrendsData = {
-  labels: ['Jul', 'Aug', 'Sep', 'Oct'],
-  datasets: [
-    {
-      label: 'Regular Hours',
-      data: [160, 168, 164, 152],
-      borderColor: '#3b82f6',
-      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-      fill: true,
-    },
-    {
-      label: 'Overtime',
-      data: [8, 4, 12, 6],
-      borderColor: '#f59e0b',
-      backgroundColor: 'rgba(245, 158, 11, 0.1)',
-      fill: true,
-    },
-  ],
-};
+const detailedTimeEntries = ref([]);
 
-const pieChartColors = [
-  '#3b82f6',
-  '#8b5cf6',
-  '#06b6d4',
-  '#10b981',
-];
+const formatIso = (iso) => {
+  if (!iso) return '';
+  try { return iso.split('T')[0]; } catch (_) { return iso; }
+}
 
-const summaryStats = {
-  totalHours: 342,
-  regularHours: 312,
-  overtimeHours: 30,
-  averageDaily: 8.2,
-  punctualityScore: 94,
-  projectsWorked: 4,
-};
+const loadReportData = async () => {
+  try {
+    const cur = await authManager.getCurrentUser();
+    if (!cur.success) throw new Error('Not signed in');
+    const user = cur.data;
+    const data = await apiService.getUserWorkingTimes(user.id);
+    const rows = Array.isArray(data) ? data : (data?.data || []);
+    detailedTimeEntries.value = rows.map(r => ({
+      date: formatIso(r.start_time || r.timestamp),
+      project: r.project || r.task || '—',
+      clockIn: r.clock_in || formatIso(r.start_time),
+      clockOut: r.clock_out || formatIso(r.end_time),
+      regular: r.regular_hours || r.hours || 0,
+      overtime: r.overtime_hours || 0,
+      total: r.duration_hours || r.hours || 0,
+      status: r.status || (r.approved ? 'approved' : (r.pending_approval ? 'pending' : 'unknown'))
+    }));
 
-const detailedTimeEntries = [
-  {
-    date: '2025-10-01',
-    project: 'Project Alpha',
-    clockIn: '09:00 AM',
-    clockOut: '05:30 PM',
-    regular: 8,
-    overtime: 0.5,
-    total: 8.5,
-    status: 'approved',
-  },
-  {
-    date: '2025-09-30',
-    project: 'Project Beta',
-    clockIn: '08:45 AM',
-    clockOut: '05:15 PM',
-    regular: 8,
-    overtime: 0.5,
-    total: 8.5,
-    status: 'approved',
-  },
-  {
-    date: '2025-09-29',
-    project: 'Project Gamma',
-    clockIn: '09:15 AM',
-    clockOut: '06:00 PM',
-    regular: 8,
-    overtime: 0.75,
-    total: 8.75,
-    status: 'pending',
-  },
-];
+    const total = detailedTimeEntries.value.reduce((s,e) => s + Number(e.total || 0), 0);
+    const regular = detailedTimeEntries.value.reduce((s,e) => s + Number(e.regular || 0), 0);
+    const overtime = detailedTimeEntries.value.reduce((s,e) => s + Number(e.overtime || 0), 0);
+    summaryStats.value = {
+      totalHours: total,
+      regularHours: regular,
+      overtimeHours: overtime,
+      averageDaily: (total / 22).toFixed(2),
+      punctualityScore: 90,
+      projectsWorked: new Set(detailedTimeEntries.value.map(d => d.project)).size,
+    };
+  } catch (err) {
+    console.error('Load report data failed', err);
+    toast.error('Failed to load report data');
+  }
+}
+
+onMounted(loadReportData);
 
 const handleExportReport = (format) => {
   toast({

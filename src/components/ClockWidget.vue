@@ -54,10 +54,16 @@ onMounted(async () => {
       status.value = 'clocked-in';
       if (ts) {
         const parsed = new Date(ts);
-        if (!isNaN(parsed.getTime())) clockedInTime.value = parsed;
+        if (!isNaN(parsed.getTime())) {
+          clockedInTime.value = parsed;
+          // initialize elapsedTime from server timestamp
+          elapsedTime.value = Math.floor((Date.now() - parsed.getTime()) / 1000);
+        }
       }
     } else {
       status.value = 'clocked-out';
+      clockedInTime.value = null;
+      elapsedTime.value = 0;
     }
   } catch (e) {
     console.debug('Could not fetch server clock state', e?.message || e);
@@ -75,10 +81,24 @@ const clockIn = async (userId = null) => {
       uid = res?.data?.id;
     }
     if (!uid) throw new Error('No user id');
-    await apiService.clockInOut(uid, 'clocked-in');
-  status.value = 'clocked-in';
-  clockedInTime.value = new Date();
-  try { window.dispatchEvent(new CustomEvent('clock-changed', { detail: { status: 'clocked-in', userId: uid } })); } catch (e) {}
+    const result = await apiService.clockInOut(uid, 'clocked-in');
+    // Prefer server-provided timestamp when available
+    const serverTs = result?.clock_in || result?.clocked_in_at || result?.start_time || result?.timestamp || result?.data?.clock_in;
+    status.value = 'clocked-in';
+    if (serverTs) {
+      const parsed = new Date(serverTs);
+      if (!isNaN(parsed.getTime())) {
+        clockedInTime.value = parsed;
+        elapsedTime.value = Math.floor((Date.now() - parsed.getTime()) / 1000);
+      } else {
+        clockedInTime.value = new Date();
+        elapsedTime.value = 0;
+      }
+    } else {
+      clockedInTime.value = new Date();
+      elapsedTime.value = 0;
+    }
+    try { window.dispatchEvent(new CustomEvent('clock-changed', { detail: { status: 'clocked-in', userId: uid } })); } catch (e) {}
   } catch (err) {
     console.error('Clock in failed', err);
   } finally {
@@ -96,11 +116,13 @@ const clockOut = async (userId = null) => {
       uid = res?.data?.id;
     }
     if (!uid) throw new Error('No user id');
-    await apiService.clockInOut(uid, 'clocked-out');
-  status.value = 'clocked-out';
-  clockedInTime.value = null;
-  elapsedTime.value = 0;
-  try { window.dispatchEvent(new CustomEvent('clock-changed', { detail: { status: 'clocked-out', userId: uid } })); } catch (e) {}
+    const result = await apiService.clockInOut(uid, 'clocked-out');
+    // If server returns final timestamps, we can compute final elapsed or simply clear
+    const serverOut = result?.clock_out || result?.clocked_out_at || result?.end_time || result?.timestamp || result?.data?.clock_out;
+    status.value = 'clocked-out';
+    clockedInTime.value = null;
+    elapsedTime.value = 0;
+    try { window.dispatchEvent(new CustomEvent('clock-changed', { detail: { status: 'clocked-out', userId: uid } })); } catch (e) {}
   } catch (err) {
     console.error('Clock out failed', err);
   } finally {

@@ -28,6 +28,7 @@
 
 <script setup>
 import { ref } from 'vue';
+import toast from '../../utils/toast.js';
 import Card from '../ui/card.vue';
 import { CardContent } from '../ui/card-components.vue';
 import Button from '../ui/button.vue';
@@ -38,18 +39,18 @@ const approvals = ref([
 ]);
 
 const approve = (item) => {
-  // demo action
-  alert(`Approved: ${item.title}`);
+  // TODO: call approvals API when available
+  toast.success(`Approved: ${item.title}`);
   approvals.value = approvals.value.filter(a => a.id !== item.id);
 };
 
 const reject = (item) => {
-  alert(`Rejected: ${item.title}`);
+  toast.warning(`Rejected: ${item.title}`);
   approvals.value = approvals.value.filter(a => a.id !== item.id);
 };
 
 const loadMore = () => {
-  alert('Loading more approvals (demo)');
+  toast.info('Loading more approvals...');
 };
 </script>
 

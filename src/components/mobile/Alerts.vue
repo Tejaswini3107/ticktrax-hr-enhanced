@@ -28,6 +28,7 @@ import { ref } from 'vue';
 import Card from '../ui/card.vue';
 import { CardContent } from '../ui/card-components.vue';
 import Button from '../ui/button.vue';
+import toast from '../../utils/toast.js';
 
 const alertItems = ref([
   { id: 1, title: 'Server CPU high', time: '10m ago', severity: 'High' },
@@ -35,7 +36,7 @@ const alertItems = ref([
 ]);
 
 const refresh = () => {
-  alert('Refreshing alerts (demo)');
+  toast.info('Refreshing alerts...');
 };
 </script>
 

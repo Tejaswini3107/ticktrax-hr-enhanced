@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import Card from './ui/card.vue';
 import { CardContent, CardHeader, CardTitle } from './ui/card-components.vue';
 import Button from './ui/button.vue';
@@ -60,131 +60,37 @@ const formatWeekRange = (weekOffset) => {
   return `${start} - ${end}`;
 };
 
-// Mock schedule data
-const weeklySchedules = [
-  {
-    weekOf: formatWeekRange(0),
-    totalHours: 40,
-    entries: [
-      {
-        id: '1',
-        date: '2025-10-01',
-        dayOfWeek: 'Monday',
-        startTime: '09:00 AM',
-        endTime: '05:00 PM',
-        hours: 8,
-        location: 'Office',
-        shift: 'Day Shift',
-        status: 'completed',
-      },
-      {
-        id: '2',
-        date: '2025-10-02',
-        dayOfWeek: 'Tuesday',
-        startTime: '09:00 AM',
-        endTime: '05:00 PM',
-        hours: 8,
-        location: 'Remote',
-        shift: 'Day Shift',
-        status: 'completed',
-      },
-      {
-        id: '3',
-        date: '2025-10-03',
-        dayOfWeek: 'Wednesday',
-        startTime: '09:00 AM',
-        endTime: '05:00 PM',
-        hours: 8,
-        location: 'Office',
-        shift: 'Day Shift',
-        status: 'scheduled',
-      },
-      {
-        id: '4',
-        date: '2025-10-04',
-        dayOfWeek: 'Thursday',
-        startTime: '09:00 AM',
-        endTime: '05:00 PM',
-        hours: 8,
-        location: 'Office',
-        shift: 'Day Shift',
-        status: 'scheduled',
-      },
-      {
-        id: '5',
-        date: '2025-10-05',
-        dayOfWeek: 'Friday',
-        startTime: '09:00 AM',
-        endTime: '05:00 PM',
-        hours: 8,
-        location: 'Remote',
-        shift: 'Day Shift',
-        status: 'scheduled',
-      },
-    ],
-  },
-  {
-    weekOf: formatWeekRange(1),
-    totalHours: 40,
-    entries: [
-      {
-        id: '6',
-        date: '2025-10-08',
-        dayOfWeek: 'Monday',
-        startTime: '09:00 AM',
-        endTime: '05:00 PM',
-        hours: 8,
-        location: 'Office',
-        shift: 'Day Shift',
-        status: 'scheduled',
-      },
-      {
-        id: '7',
-        date: '2025-10-09',
-        dayOfWeek: 'Tuesday',
-        startTime: '10:00 AM',
-        endTime: '06:00 PM',
-        hours: 8,
-        location: 'Client Site',
-        shift: 'Modified Shift',
-        status: 'modified',
-      },
-      {
-        id: '8',
-        date: '2025-10-10',
-        dayOfWeek: 'Wednesday',
-        startTime: '09:00 AM',
-        endTime: '05:00 PM',
-        hours: 8,
-        location: 'Office',
-        shift: 'Day Shift',
-        status: 'scheduled',
-      },
-      {
-        id: '9',
-        date: '2025-10-11',
-        dayOfWeek: 'Thursday',
-        startTime: '09:00 AM',
-        endTime: '05:00 PM',
-        hours: 8,
-        location: 'Remote',
-        shift: 'Day Shift',
-        status: 'scheduled',
-      },
-      {
-        id: '10',
-        date: '2025-10-12',
-        dayOfWeek: 'Friday',
-        startTime: '09:00 AM',
-        endTime: '01:00 PM',
-        hours: 4,
-        location: 'Office',
-        shift: 'Half Day',
-        status: 'scheduled',
-      },
-    ],
-  },
-];
+import apiService from '../services/apiService.js';
+import authManager from '../services/authService.js';
+import toast from '../utils/toast.js';
+
+// Start empty; always prefer live API data. If API fails we'll show empty state and surface an error.
+const weeklySchedules = ref([]);
+
+const loadSchedules = async () => {
+  try {
+    const cur = await authManager.getCurrentUser();
+    if (!cur.success) throw new Error('Not signed in');
+    const user = cur.data;
+    const constraints = await apiService.getEmployeeScheduleConstraints(user.id);
+    // expect constraints to include schedule blocks; normalize into weeklySchedules
+    if (Array.isArray(constraints) && constraints.length) {
+      // Very small normalization example; real shape depends on API
+      weeklySchedules.value = constraints.map((c, idx) => ({
+        weekOf: c.week_of || formatWeekRange(idx),
+        totalHours: c.total_hours || 0,
+        entries: Array.isArray(c.entries) ? c.entries : []
+      }));
+    }
+  } catch (err) {
+    console.warn('Failed to load schedules', err);
+    toast.error('Unable to load schedules from server. Please try again later.');
+    // keep weeklySchedules empty so UI shows empty state
+    weeklySchedules.value = [];
+  }
+}
+
+onMounted(loadSchedules);
 
 const currentSchedule = computed(() => weeklySchedules[currentWeek.value] || weeklySchedules[0]);
 

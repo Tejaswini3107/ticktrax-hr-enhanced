@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import Card from './ui/card.vue';
 import { CardContent, CardHeader, CardTitle } from './ui/card-components.vue';
 import Button from './ui/button.vue';
@@ -45,6 +45,8 @@ import {
   Search,
 } from 'lucide-vue-next';
 import { useToast } from './ui/toast/use-toast.js';
+import { apiService } from '../services/apiService.js';
+import authManager from '../services/authService.js';
 
 const { toast } = useToast();
 
@@ -60,50 +62,70 @@ const newEntry = ref({
   justification: '',
 });
 
-const timeEntries = ref([
-  {
-    id: '1',
-    date: '2025-10-01',
-    clockIn: '09:00 AM',
-    clockOut: '05:30 PM',
-    hours: '8.5',
-    project: 'Project Alpha',
-    status: 'approved',
-    isManual: false,
-  },
-  {
-    id: '2',
-    date: '2025-09-30',
-    clockIn: '08:45 AM',
-    clockOut: '05:15 PM',
-    hours: '8.5',
-    project: 'Project Beta',
-    status: 'approved',
-    isManual: false,
-  },
-  {
-    id: '3',
-    date: '2025-09-29',
-    clockIn: '09:15 AM',
-    clockOut: '06:00 PM',
-    hours: '8.75',
-    project: 'Project Gamma',
-    status: 'pending',
-    isManual: true,
-    justification: 'Forgot to clock in due to urgent meeting',
-  },
-  {
-    id: '4',
-    date: '2025-09-28',
-    clockIn: '08:30 AM',
-    clockOut: '05:00 PM',
-    hours: '8.5',
-    project: 'Project Alpha',
-    status: 'rejected',
-    isManual: true,
-    justification: 'System was down during clock in',
-  },
-]);
+const timeEntries = ref([]);
+const isLoading = ref(false);
+const loadError = ref(null);
+
+// Helper to format ISO datetimes to 'YYYY-MM-DD HH:MM:SS'
+const formatIsoToLocal = (input) => {
+  if (!input && input !== 0) return '';
+  const d = (input instanceof Date) ? input : new Date(input);
+  if (isNaN(d.getTime())) return input || '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+
+const normalize = (raw) => {
+  const dateRaw = raw.date || raw.start_date || raw.day || '';
+  const clockInRaw = raw.start_time || raw.clock_in || raw.in || '';
+  const clockOutRaw = raw.end_time || raw.clock_out || raw.out || '';
+  const parsedDate = dateRaw ? new Date(dateRaw) : null;
+  const parsedTs = parsedDate && !isNaN(parsedDate.getTime()) ? parsedDate.getTime() : null;
+  const date = parsedTs ? formatIsoToLocal(parsedDate) : (dateRaw || '');
+  const clockIn = (clockInRaw && clockInRaw.includes('T')) ? formatIsoToLocal(clockInRaw) : (clockInRaw || '');
+  const clockOut = (clockOutRaw && clockOutRaw.includes('T')) ? formatIsoToLocal(clockOutRaw) : (clockOutRaw || '');
+  const hours = Number(raw.hours || raw.duration_hours || raw.duration || 0);
+  return {
+    id: raw.id || `${date}:${clockIn}`,
+    date,
+    clockIn,
+    clockOut,
+    hours: String(hours),
+    project: raw.project || raw.task || '',
+    status: raw.status || (raw.approved ? 'approved' : raw.pending_approval ? 'pending' : 'pending'),
+    isManual: Boolean(raw.is_manual || raw.isManual || raw.manual),
+    justification: raw.justification || raw.reason || '',
+    _ts: parsedTs,
+  };
+};
+
+const loadEntries = async () => {
+  isLoading.value = true;
+  loadError.value = null;
+  try {
+    const u = await authManager.getCurrentUser();
+    const user = u?.data;
+    if (!user || !user.id) throw new Error('No user');
+    const data = await apiService.getUserWorkingTimes(user.id);
+    const items = Array.isArray(data) ? data : (data?.data || []);
+    timeEntries.value = items.map(normalize).sort((a,b) => (b._ts || 0) - (a._ts || 0));
+  } catch (err) {
+    console.error('Load entries failed', err);
+    loadError.value = err.message || String(err);
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+// Refresh when clock changes
+const onClockChanged = () => loadEntries();
+onMounted(() => {
+  loadEntries();
+  window.addEventListener('clock-changed', onClockChanged);
+});
+onUnmounted(() => {
+  try { window.removeEventListener('clock-changed', onClockChanged); } catch (e) {}
+});
 
 const calculateHours = (startTime, endTime) => {
   if (!startTime || !endTime) return '0';
@@ -148,6 +170,8 @@ const handleSubmitEntry = () => {
     workLocation: '',
     justification: '',
   };
+  // Refresh list; backend create not available here so assume manual approval pipeline
+  loadEntries();
 };
 
 const filteredEntries = computed(() =>
@@ -156,20 +180,26 @@ const filteredEntries = computed(() =>
       filterStatus.value === 'all' || entry.status === filterStatus.value;
     const matchesSearch =
       searchTerm.value === '' ||
-      entry.project.toLowerCase().includes(searchTerm.value.toLowerCase()) ||
+      (entry.project || '').toLowerCase().includes(searchTerm.value.toLowerCase()) ||
       entry.date.includes(searchTerm.value);
     return matchesStatus && matchesSearch;
   })
 );
 
 const stats = computed(() => ({
-  totalHours: timeEntries.value.reduce(
-    (acc, entry) => acc + parseFloat(entry.hours),
-    0
-  ),
+  totalHours: timeEntries.value.reduce((acc, entry) => acc + parseFloat(entry.hours || 0), 0),
   pendingEntries: timeEntries.value.filter((e) => e.status === 'pending').length,
   manualEntries: timeEntries.value.filter((e) => e.isManual).length,
-  thisWeekHours: 40.5,
+  thisWeekHours: (function(){
+    const now = new Date();
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - now.getDay());
+    return timeEntries.value.reduce((acc,e) => {
+      const d = e._ts ? new Date(e._ts) : new Date(e.date);
+      if (!isNaN(d.getTime()) && d >= startOfWeek) return acc + Number(e.hours || 0);
+      return acc;
+    }, 0).toFixed(2);
+  })(),
 }));
 </script>
 

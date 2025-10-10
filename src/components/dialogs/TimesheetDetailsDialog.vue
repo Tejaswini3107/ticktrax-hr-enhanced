@@ -96,6 +96,35 @@ const defaultEntries = computed(() =>
       ]
 );
 
+  import apiService from '../../services/apiService.js';
+  import authManager from '../../services/authService.js';
+  import { ref, onMounted } from 'vue';
+
+  // If no entries provided, attempt to load from API using employee prop (if present)
+  const apiEntries = ref([]);
+  const loadApiEntries = async () => {
+    try {
+      if (props.entries && props.entries.length) return;
+      // if employee id available, load working times for that employee
+      const empId = props.employeeId || (props.employee && props.employee.id);
+      if (!empId) return;
+      const data = await apiService.getUserWorkingTimes(empId);
+      const rows = Array.isArray(data) ? data : (data?.data || []);
+      apiEntries.value = rows.map(r => ({
+        date: r.start_time ? r.start_time.split('T')[0] : (r.timestamp || ''),
+        clockIn: r.clock_in || r.start_time || '',
+        clockOut: r.clock_out || r.end_time || '',
+        hours: r.duration_hours || r.hours || 0,
+        status: r.status || (r.approved ? 'approved' : (r.pending_approval ? 'pending' : 'unknown')),
+        location: r.location || r.notes || ''
+      }));
+    } catch (err) {
+      console.warn('TimesheetDetailsDialog: failed to load entries', err);
+    }
+  };
+
+  onMounted(loadApiEntries);
+
 const totalHours = computed(() =>
   defaultEntries.value.reduce((sum, entry) => sum + entry.hours, 0)
 );

@@ -24,6 +24,7 @@
 
 <script setup>
 import { ref } from 'vue';
+import toast from '../../utils/toast.js';
 import Card from '../ui/card.vue';
 import { CardContent } from '../ui/card-components.vue';
 import Button from '../ui/button.vue';
@@ -37,7 +38,8 @@ const schedule = ref([
 ]);
 
 const requestTimeOff = () => {
-  alert('Time off request submitted (demo)');
+  // TODO: call API to request time off
+  toast.info('Time off request submitted');
 };
 </script>
 

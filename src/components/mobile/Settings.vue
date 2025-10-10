@@ -43,15 +43,29 @@
 <script setup>
 console.debug('[Settings] module loaded');
 import { ref, onMounted } from 'vue';
+import authManager from '../../services/authService.js';
+import toast from '../../utils/toast.js';
 import Card from '../ui/card.vue';
 import Button from '../ui/button.vue';
 
 const notificationsEnabled = ref(true);
 const theme = ref('system');
 
-const signOutAll = () => {
+const signOutAll = async () => {
   console.debug('[Settings] signOutAll');
-  alert('Signed out of all devices (demo)');
+  try {
+    const ok = await authManager.logout();
+    if (ok) {
+      toast.success('Signed out of all devices');
+      // Optionally redirect or emit logout
+      window.location.reload();
+    } else {
+      toast.error('Failed to sign out');
+    }
+  } catch (err) {
+    console.error(err);
+    toast.error('Sign out failed');
+  }
 };
 
 onMounted(() => {

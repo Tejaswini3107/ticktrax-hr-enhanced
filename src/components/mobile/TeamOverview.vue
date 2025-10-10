@@ -43,6 +43,7 @@
 <script setup>
 import { ref } from 'vue';
 import { onMounted } from 'vue';
+import toast from '../../utils/toast.js';
 import Card from '../ui/card.vue';
 import { CardContent } from '../ui/card-components.vue';
 import Button from '../ui/button.vue';
@@ -57,15 +58,15 @@ const members = ref([
 ]);
 
 const viewProfile = (m) => {
-  alert(`Viewing profile for ${m.name} (demo)`);
+  toast.info(`Viewing profile: ${m.name}`);
 };
 
 const message = (m) => {
-  alert(`Opening chat with ${m.name} (demo)`);
+  toast.info(`Opening chat with ${m.name}`);
 };
 
 const refresh = () => {
-  alert('Refreshing team data (demo)');
+  toast.info('Refreshing team data...');
 };
 
 onMounted(() => {

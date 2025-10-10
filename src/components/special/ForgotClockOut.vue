@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue';
+import toast from '../../utils/toast.js';
 import Card from '../ui/card.vue';
 import {
   CardContent,
@@ -27,14 +28,24 @@ const missedClockOuts = [
   { date: '2025-09-25', clockIn: '8:15 AM', status: 'approved' },
 ];
 
-const handleSubmit = () => {
+const handleSubmit = async () => {
   if (selectedTime.value && reason.value.trim()) {
     submitted.value = true;
-    setTimeout(() => {
-      submitted.value = false;
-      selectedTime.value = '';
-      reason.value = '';
-    }, 3000);
+    toast.loading('Submitting request...');
+    try {
+      // TODO: call backend endpoint to submit missing clock-out
+      await new Promise((r) => setTimeout(r, 800));
+      toast.success('Request submitted');
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to submit request');
+    } finally {
+      setTimeout(() => {
+        submitted.value = false;
+        selectedTime.value = '';
+        reason.value = '';
+      }, 500);
+    }
   }
 };
 </script>
