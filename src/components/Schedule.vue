@@ -75,12 +75,92 @@ const loadSchedules = async () => {
     const constraints = await apiService.getEmployeeScheduleConstraints(user.id);
     // expect constraints to include schedule blocks; normalize into weeklySchedules
     if (Array.isArray(constraints) && constraints.length) {
-      // Very small normalization example; real shape depends on API
-      weeklySchedules.value = constraints.map((c, idx) => ({
-        weekOf: c.week_of || formatWeekRange(idx),
-        totalHours: c.total_hours || 0,
-        entries: Array.isArray(c.entries) ? c.entries : []
-      }));
+      const normalized = constraints.map((c, idx) => {
+        const rawEntries = Array.isArray(c.entries) ? c.entries : [];
+
+        // helper to compute hours robustly per entry
+        const computeEntryHours = (t) => {
+          if (!t) return 0;
+          // explicit hour-like fields
+          const hourFields = [t.hours, t.duration_hours, t.duration, t.total_hours, t.hours_total];
+          for (const v of hourFields) {
+            const n = Number(v);
+            if (!isNaN(n) && n !== 0) return n;
+          }
+          // minute-like fields
+          const minuteFields = [t.minutes, t.duration_minutes, t.total_minutes];
+          for (const v of minuteFields) {
+            const n = Number(v);
+            if (!isNaN(n) && n !== 0) return n / 60;
+          }
+          // fallback to start/end timestamps
+          const s = t.start_time || t.start || t.started_at || t.timestamp || t.date;
+          const e = t.end_time || t.end || t.ended_at || t.stopped_at || t.stop_time || t.updated_at;
+          if (!s) return 0;
+          const sd = new Date(s);
+          if (isNaN(sd)) return 0;
+          let ed = e ? new Date(e) : null;
+          if ((!ed || isNaN(ed)) && (t.status === 'running' || t.status === 'in_progress' || t.active)) {
+            ed = new Date();
+          }
+          if (!ed || isNaN(ed)) return 0;
+          const diff = (ed.getTime() - sd.getTime()) / (1000 * 60 * 60);
+          return diff > 0 ? Math.round(diff * 10) / 10 : 0;
+        };
+
+        const entries = rawEntries.map((raw, i) => {
+          // derive a stable id
+          const id = raw.id || raw.entry_id || `${idx}-${i}`;
+
+          // determine a start timestamp to derive date and time
+          const startRaw = raw.start_time || raw.start || raw.started_at || raw.timestamp || raw.date;
+          const endRaw = raw.end_time || raw.end || raw.ended_at || raw.stopped_at || raw.stop_time || raw.updated_at;
+
+          // normalize date to YYYY-MM-DD (ISO date portion)
+          let dateStr = raw.date || '';
+          if (!dateStr && startRaw) {
+            try { dateStr = new Date(startRaw).toISOString().split('T')[0]; } catch(e) { dateStr = ''; }
+          }
+
+          // time strings for UI
+          const formatTime = (ts) => {
+            if (!ts) return '';
+            const d = new Date(ts);
+            if (isNaN(d)) return String(ts);
+            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          };
+
+          const startTime = raw.startTime || raw.start_time || raw.start || (startRaw ? formatTime(startRaw) : '');
+          const endTime = raw.endTime || raw.end_time || raw.end || (endRaw ? formatTime(endRaw) : '');
+
+          const hours = Number(raw.hours ?? raw.duration_hours ?? raw.total_hours ?? computeEntryHours(raw)) || 0;
+
+          const dayOfWeek = raw.dayOfWeek || raw.day || (dateStr ? new Date(dateStr).toLocaleDateString('en-US', { weekday: 'long' }) : '');
+
+          return {
+            id,
+            dayOfWeek,
+            date: dateStr,
+            startTime,
+            endTime,
+            hours,
+            location: raw.location || raw.place || raw.site || '',
+            shift: raw.shift || raw.shift_name || raw.title || raw.role || '',
+            status: raw.status || 'scheduled',
+          };
+        });
+
+        // compute week total hours
+        const totalHours = entries.reduce((acc, e) => acc + (Number(e.hours) || 0), 0);
+
+        return {
+          weekOf: c.week_of || formatWeekRange(idx),
+          totalHours: Math.round(totalHours * 10) / 10,
+          entries,
+        };
+      });
+
+      weeklySchedules.value = normalized;
     }
   } catch (err) {
     console.warn('Failed to load schedules', err);

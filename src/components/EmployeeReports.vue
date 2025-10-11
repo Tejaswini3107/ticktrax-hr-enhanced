@@ -120,19 +120,69 @@ const loadReportData = async () => {
       const data = await apiService.getUserWorkingTimes(user.id);
       rows = Array.isArray(data) ? data : (data?.data || []);
     }
-    detailedTimeEntries.value = rows.map(r => ({
-      date: formatIso(r.start_time || r.timestamp),
-      project: r.project || r.task || '—',
-      clockIn: r.clock_in || formatIso(r.start_time),
-      clockOut: r.clock_out || formatIso(r.end_time),
-      regular: r.regular_hours || r.hours || 0,
-      overtime: r.overtime_hours || 0,
-      total: r.duration_hours || r.hours || 0,
-      status: r.status || (r.approved ? 'approved' : (r.pending_approval ? 'pending' : 'unknown'))
+    // Normalize rows into a consistent shape so charts consume a predictable model
+    const normalized = rows.map(r => {
+      const startRaw = r.start_time || r.started_at || r.timestamp || r.date || r.start || '';
+      const endRaw = r.end_time || r.ended_at || r.stopped_at || r.stop_time || r.end || r.updated_at || '';
+
+      const makeIsoDate = (s) => {
+        if (!s) return '';
+        try { return new Date(s).toISOString().split('T')[0]; } catch (_) { return String(s).split('T')[0] || ''; }
+      };
+
+      const computeEntryHours = (t) => {
+        if (!t) return 0;
+        const hourFields = [t.duration_hours, t.hours, t.regular_hours, t.total_hours, t.duration, t.hours_total];
+        for (const v of hourFields) {
+          const n = Number(v);
+          if (!isNaN(n) && n !== 0) return n;
+        }
+        const minuteFields = [t.duration_minutes, t.minutes, t.total_minutes];
+        for (const v of minuteFields) {
+          const n = Number(v);
+          if (!isNaN(n) && n !== 0) return n / 60;
+        }
+        // fallback to start/end timestamps
+        if (!startRaw) return 0;
+        const sd = new Date(startRaw);
+        if (isNaN(sd)) return 0;
+        let ed = endRaw ? new Date(endRaw) : null;
+        if ((!ed || isNaN(ed)) && (r.status === 'running' || r.status === 'in_progress' || r.active)) ed = new Date();
+        if (!ed || isNaN(ed)) return 0;
+        const diff = (ed.getTime() - sd.getTime()) / (1000 * 60 * 60);
+        return diff > 0 ? Math.round(diff * 100) / 100 : 0;
+      };
+
+      const dateIso = makeIsoDate(startRaw) || makeIsoDate(r.date) || '';
+
+      return {
+        raw: r,
+        date: dateIso,
+        start: startRaw || '',
+        end: endRaw || '',
+        project: r.project || r.task || '—',
+        clockIn: r.clock_in || startRaw || '',
+        clockOut: r.clock_out || endRaw || '',
+        regular: Number(r.regular_hours || r.regular || 0) || 0,
+        overtime: Number(r.overtime_hours || 0) || 0,
+        total: Number(r.duration_hours || r.hours || computeEntryHours(r)) || 0,
+        location: r.location || r.site || r.type || 'Unknown',
+        status: r.status || (r.approved ? 'approved' : (r.pending_approval ? 'pending' : 'unknown')),
+      };
+    });
+
+    detailedTimeEntries.value = normalized.map(n => ({
+      date: formatIso(n.start || n.date),
+      project: n.project,
+      clockIn: n.clockIn,
+      clockOut: n.clockOut,
+      regular: n.regular,
+      overtime: n.overtime,
+      total: n.total,
+      status: n.status,
     }));
 
     // --- Build chart data ---
-    // Weekly (last 7 days) labels
     const today = new Date();
     const last7 = [];
     for (let i = 6; i >= 0; i--) {
@@ -141,99 +191,84 @@ const loadReportData = async () => {
       last7.push(d.toISOString().split('T')[0]);
     }
 
-    const regularByDay = {};
-    const overtimeByDay = {};
+    // Weekly totals
+    const regularByDay = {}; const overtimeByDay = {};
     last7.forEach(d => { regularByDay[d] = 0; overtimeByDay[d] = 0; });
 
-    // Populate per-day totals
-    detailedTimeEntries.value.forEach(e => {
-      const dt = e.date;
+    normalized.forEach(n => {
+      const dt = n.date || (n.start ? (new Date(n.start).toISOString().split('T')[0]) : '');
       if (!dt) return;
-      const reg = Number(e.regular || 0);
-      const ot = Number(e.overtime || 0);
-      if (regularByDay.hasOwnProperty(dt)) {
-        regularByDay[dt] += reg;
-        overtimeByDay[dt] += ot;
+      if (!last7.includes(dt)) return;
+      regularByDay[dt] = (regularByDay[dt] || 0) + (Number(n.regular) || 0);
+      overtimeByDay[dt] = (overtimeByDay[dt] || 0) + (Number(n.overtime) || 0);
+      // if regular/overtime not present, attribute total to regular as fallback
+      if ((!n.regular || Number(n.regular) === 0) && (!n.overtime || Number(n.overtime) === 0)) {
+        regularByDay[dt] += Number(n.total || 0);
       }
     });
 
     weeklyHoursData.value = {
-      labels: last7.map(d => d),
+      labels: last7.slice(),
       datasets: [
         { label: 'Regular Hours', data: last7.map(d => Number((regularByDay[d] || 0).toFixed(2))), backgroundColor: '#3b82f6' },
         { label: 'Overtime', data: last7.map(d => Number((overtimeByDay[d] || 0).toFixed(2))), backgroundColor: '#f59e0b' },
       ]
     };
 
-    // Work location: compute average hours per day (over the last 7 days)
-    const locByDay = {};
-    last7.forEach(d => { locByDay[d] = {}; });
-
-    rows.forEach(r => {
-      const s = r.start_time || r.timestamp || r.date || '';
-      const dt = s ? s.split('T')[0] : '';
-      if (!dt || !locByDay.hasOwnProperty(dt)) return; // only consider last 7 days
-      const loc = (r.location || r.type || 'Unknown');
-      const hrs = Number(r.duration_hours || r.hours || 0) || 0;
-      locByDay[dt][loc] = (locByDay[dt][loc] || 0) + hrs;
-    });
-
-    // Sum across days and compute average per day
+    // Work location: aggregate total hours per location across last 7 days and show average per day
     const locTotals = {};
-    last7.forEach(d => {
-      const dayMap = locByDay[d] || {};
-      Object.keys(dayMap).forEach(loc => {
-        locTotals[loc] = (locTotals[loc] || 0) + dayMap[loc];
-      });
-    });
+    const normalizeLoc = (l) => {
+      if (!l) return 'Unspecified';
+      const s = String(l).trim();
+      if (!s || /^unknown$/i.test(s)) return 'Unspecified';
+      return s;
+    };
 
+    normalized.forEach(n => {
+      const dt = n.date || (n.start ? (new Date(n.start).toISOString().split('T')[0]) : '');
+      if (!dt || !last7.includes(dt)) return;
+      const loc = normalizeLoc(n.location);
+      locTotals[loc] = (locTotals[loc] || 0) + Number(n.total || 0);
+    });
     const daysCount = last7.length || 1;
     const locAvgPerDay = {};
-    Object.keys(locTotals).forEach(loc => {
-      locAvgPerDay[loc] = Number((locTotals[loc] / daysCount).toFixed(2));
-    });
-
+    Object.keys(locTotals).forEach(loc => { locAvgPerDay[loc] = Number((locTotals[loc] / daysCount).toFixed(2)); });
     workLocationData.value = {
       labels: Object.keys(locAvgPerDay),
       datasets: [{ label: 'Avg Hours/Day', data: Object.values(locAvgPerDay), backgroundColor: pieChartColors.slice(0, Object.keys(locAvgPerDay).length) }]
     };
 
     // Monthly trends (last 6 months)
-    const months = [];
-    const monthTotals = {};
+    const months = []; const monthTotals = {};
     for (let m = 5; m >= 0; m--) {
-      const d = new Date();
-      d.setMonth(d.getMonth() - m);
+      const d = new Date(); d.setMonth(d.getMonth() - m);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      months.push(key);
-      monthTotals[key] = 0;
+      months.push(key); monthTotals[key] = 0;
     }
-    rows.forEach(r => {
-      const s = r.start_time || r.timestamp || r.date || '';
+    normalized.forEach(n => {
+      const s = n.start || n.date || '';
       if (!s) return;
-      const key = s.split('T')[0].slice(0,7).replace('-', '-');
-      const hrs = Number(r.duration_hours || r.hours || 0) || 0;
-      if (monthTotals.hasOwnProperty(key)) monthTotals[key] += hrs;
+      const key = (new Date(s)).toISOString().slice(0,7);
+      if (monthTotals.hasOwnProperty(key)) monthTotals[key] += Number(n.total || 0);
     });
     monthlyTrendsData.value = {
       labels: months.map(m => {
-        const [y, mm] = m.split('-');
-        const d = new Date(Number(y), Number(mm)-1, 1);
+        const [y, mm] = m.split('-'); const d = new Date(Number(y), Number(mm)-1, 1);
         return d.toLocaleString(undefined, { month: 'short', year: 'numeric' });
       }),
       datasets: [{ label: 'Hours', data: months.map(m => Number((monthTotals[m] || 0).toFixed(2))), backgroundColor: '#3b82f6' }]
     };
 
-    const total = detailedTimeEntries.value.reduce((s,e) => s + Number(e.total || 0), 0);
-    const regular = detailedTimeEntries.value.reduce((s,e) => s + Number(e.regular || 0), 0);
-    const overtime = detailedTimeEntries.value.reduce((s,e) => s + Number(e.overtime || 0), 0);
+    const total = normalized.reduce((s,n) => s + Number(n.total || 0), 0);
+    const regular = normalized.reduce((s,n) => s + Number(n.regular || 0), 0);
+    const overtime = normalized.reduce((s,n) => s + Number(n.overtime || 0), 0);
     summaryStats.value = {
-      totalHours: total,
-      regularHours: regular,
-      overtimeHours: overtime,
-      averageDaily: (total / 22).toFixed(2),
+      totalHours: Number(total.toFixed(2)),
+      regularHours: Number(regular.toFixed(2)),
+      overtimeHours: Number(overtime.toFixed(2)),
+      averageDaily: (total / Math.max(1, 22)).toFixed(2),
       punctualityScore: 90,
-      projectsWorked: new Set(detailedTimeEntries.value.map(d => d.project)).size,
+      projectsWorked: new Set(normalized.map(n => n.project)).size,
     };
   } catch (err) {
     console.error('Load report data failed', err);
@@ -381,7 +416,7 @@ const periodLabel = computed(() => {
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card>
             <CardHeader>
-              <CardTitle>Weekly Hours Breakdown</CardTitle>
+              <CardTitle>Weekly Hours (Last 7 Days)</CardTitle>
             </CardHeader>
             <CardContent>
               <div class="w-full h-[300px]">
@@ -394,7 +429,7 @@ const periodLabel = computed(() => {
 
           <Card>
             <CardHeader>
-              <CardTitle>Work Overview</CardTitle>
+              <CardTitle>Work Locations (Avg Hours/Day)</CardTitle>
             </CardHeader>
             <CardContent>
               <div class="w-full h-[300px] rounded-[12px] flex items-center justify-center">
