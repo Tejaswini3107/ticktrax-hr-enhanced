@@ -274,7 +274,7 @@ const handleSaveUser = (userData) => {
                   <TableHead>Employee</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
-                  <TableHead>Status</TableHead>
+                  <!-- <TableHead>Status</TableHead> -->
                   <TableHead>Hours This Week</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -295,11 +295,11 @@ const handleSaveUser = (userData) => {
                 <TableCell>
                   <Badge :variant="employee.role === 'manager' ? 'default' : 'secondary'">{{ employee.role }}</Badge>
                 </TableCell>
-                <TableCell>
+                <!-- <TableCell>
                   <Badge :variant="employee.status === 'active' ? 'default' : 'secondary'" :class="employee.status === 'active' ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'">
                     {{ employee.status }}
                   </Badge>
-                </TableCell>
+                </TableCell> -->
                 <TableCell>{{ employee.hoursThisWeek }}h</TableCell>
                 
                 <TableCell>
