@@ -101,6 +101,99 @@ const loadReportData = async () => {
       status: r.status || (r.approved ? 'approved' : (r.pending_approval ? 'pending' : 'unknown'))
     }));
 
+    // --- Build chart data ---
+    // Weekly (last 7 days) labels
+    const today = new Date();
+    const last7 = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      last7.push(d.toISOString().split('T')[0]);
+    }
+
+    const regularByDay = {};
+    const overtimeByDay = {};
+    last7.forEach(d => { regularByDay[d] = 0; overtimeByDay[d] = 0; });
+
+    // Populate per-day totals
+    detailedTimeEntries.value.forEach(e => {
+      const dt = e.date;
+      if (!dt) return;
+      const reg = Number(e.regular || 0);
+      const ot = Number(e.overtime || 0);
+      if (regularByDay.hasOwnProperty(dt)) {
+        regularByDay[dt] += reg;
+        overtimeByDay[dt] += ot;
+      }
+    });
+
+    weeklyHoursData.value = {
+      labels: last7.map(d => d),
+      datasets: [
+        { label: 'Regular Hours', data: last7.map(d => Number((regularByDay[d] || 0).toFixed(2))), backgroundColor: '#3b82f6' },
+        { label: 'Overtime', data: last7.map(d => Number((overtimeByDay[d] || 0).toFixed(2))), backgroundColor: '#f59e0b' },
+      ]
+    };
+
+    // Work location: compute average hours per day (over the last 7 days)
+    const locByDay = {};
+    last7.forEach(d => { locByDay[d] = {}; });
+
+    rows.forEach(r => {
+      const s = r.start_time || r.timestamp || r.date || '';
+      const dt = s ? s.split('T')[0] : '';
+      if (!dt || !locByDay.hasOwnProperty(dt)) return; // only consider last 7 days
+      const loc = (r.location || r.type || 'Unknown');
+      const hrs = Number(r.duration_hours || r.hours || 0) || 0;
+      locByDay[dt][loc] = (locByDay[dt][loc] || 0) + hrs;
+    });
+
+    // Sum across days and compute average per day
+    const locTotals = {};
+    last7.forEach(d => {
+      const dayMap = locByDay[d] || {};
+      Object.keys(dayMap).forEach(loc => {
+        locTotals[loc] = (locTotals[loc] || 0) + dayMap[loc];
+      });
+    });
+
+    const daysCount = last7.length || 1;
+    const locAvgPerDay = {};
+    Object.keys(locTotals).forEach(loc => {
+      locAvgPerDay[loc] = Number((locTotals[loc] / daysCount).toFixed(2));
+    });
+
+    workLocationData.value = {
+      labels: Object.keys(locAvgPerDay),
+      datasets: [{ label: 'Avg Hours/Day', data: Object.values(locAvgPerDay), backgroundColor: pieChartColors.slice(0, Object.keys(locAvgPerDay).length) }]
+    };
+
+    // Monthly trends (last 6 months)
+    const months = [];
+    const monthTotals = {};
+    for (let m = 5; m >= 0; m--) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - m);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      months.push(key);
+      monthTotals[key] = 0;
+    }
+    rows.forEach(r => {
+      const s = r.start_time || r.timestamp || r.date || '';
+      if (!s) return;
+      const key = s.split('T')[0].slice(0,7).replace('-', '-');
+      const hrs = Number(r.duration_hours || r.hours || 0) || 0;
+      if (monthTotals.hasOwnProperty(key)) monthTotals[key] += hrs;
+    });
+    monthlyTrendsData.value = {
+      labels: months.map(m => {
+        const [y, mm] = m.split('-');
+        const d = new Date(Number(y), Number(mm)-1, 1);
+        return d.toLocaleString(undefined, { month: 'short', year: 'numeric' });
+      }),
+      datasets: [{ label: 'Hours', data: months.map(m => Number((monthTotals[m] || 0).toFixed(2))), backgroundColor: '#3b82f6' }]
+    };
+
     const total = detailedTimeEntries.value.reduce((s,e) => s + Number(e.total || 0), 0);
     const regular = detailedTimeEntries.value.reduce((s,e) => s + Number(e.regular || 0), 0);
     const overtime = detailedTimeEntries.value.reduce((s,e) => s + Number(e.overtime || 0), 0);
@@ -119,6 +212,10 @@ const loadReportData = async () => {
 }
 
 onMounted(loadReportData);
+
+const hasWorkLocationData = computed(() => {
+  return Array.isArray(workLocationData.value?.labels) && workLocationData.value.labels.length > 0 && Array.isArray(workLocationData.value?.datasets) && workLocationData.value.datasets.length > 0;
+});
 
 const handleExportReport = (format) => {
   toast({
@@ -227,7 +324,7 @@ const periodLabel = computed(() => {
           </div>
         </CardContent>
       </Card>
-      <Card>
+      <!-- <Card>
         <CardContent class="pt-6">
           <div class="flex items-center justify-between">
             <div>
@@ -240,7 +337,7 @@ const periodLabel = computed(() => {
             <Target class="h-8 w-8 text-blue-500" />
           </div>
         </CardContent>
-      </Card>
+      </Card> -->
     </div>
 
     <Tabs defaultValue="overview" class="w-full">
@@ -270,10 +367,19 @@ const periodLabel = computed(() => {
               <CardTitle>Work Overview</CardTitle>
             </CardHeader>
             <CardContent>
-              <div class="w-full h-[300px] rounded-[12px]">
-                <ResponsiveContainer width="70%" height="100%">
-                  <PieChart :data="workLocationData" />
-                </ResponsiveContainer>
+              <div class="w-full h-[300px] rounded-[12px] flex items-center justify-center">
+                <template v-if="hasWorkLocationData">
+                  <div class="w-full h-full flex items-center justify-center">
+                    <ResponsiveContainer width="70%" height="100%">
+                      <PieChart :data="workLocationData" />
+                    </ResponsiveContainer>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="text-center text-sm text-muted-foreground">
+                    No work location data for the selected period.
+                  </div>
+                </template>
               </div>
             </CardContent>
           </Card>

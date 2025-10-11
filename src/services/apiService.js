@@ -57,18 +57,65 @@ class GothamApiService {
 
       const config = { headers, ...options };
 
+      // Helpful debug information in dev: show method, url and whether auth/xsrf tokens are present
+      if (import.meta.env && import.meta.env.DEV) {
+        try {
+          console.debug('API Request debug', {
+            method: config.method || 'GET',
+            url,
+            hasAuthorization: !!this.jwtToken,
+            hasXsrf: !!this.xsrfToken,
+            endpoint
+          });
+        } catch (_) {}
+      }
+
       console.log(`API Request: ${config.method || 'GET'} ${url}`);
-      
+
       const response = await fetch(url, config);
+
+      // Log response status and content-type for easier debugging when SPA HTML is returned
+      try {
+        const respContentType = response.headers.get('content-type') || '';
+        if (import.meta.env && import.meta.env.DEV) {
+          console.debug('API Response debug', { status: response.status, contentType: respContentType, url });
+        }
+        console.log(`API Response status: ${response.status} content-type: ${respContentType}`);
+      } catch (e) {
+        // ignore logging errors
+      }
       
       if (!response.ok) {
         let message = `HTTP error! status: ${response.status}`;
+        let errBody = null;
         try {
-          const errJson = await response.json();
-          const apiMsg = errJson?.error || errJson?.message || (Array.isArray(errJson?.errors) ? errJson.errors.join(', ') : null);
-          if (apiMsg) message = `${response.status} ${apiMsg}`;
+          // Try to parse JSON body first; fall back to text when not JSON
+          const parsed = await response.clone().json().catch(() => null);
+          if (parsed) {
+            errBody = parsed;
+            const apiMsg = parsed?.error || parsed?.message || (Array.isArray(parsed?.errors) ? parsed.errors.join(', ') : null);
+            if (apiMsg) {
+              message = `${response.status} ${apiMsg}`;
+            } else {
+              message = `${response.status} ${JSON.stringify(parsed)}`;
+            }
+          } else {
+            const text = await response.clone().text().catch(() => null);
+            if (text) {
+              errBody = text;
+              message = `${response.status} ${text.toString().slice(0,400)}`;
+            }
+          }
         } catch (_) {}
-        throw new Error(message);
+        const err = new Error(message);
+        // Attach parsed body for upstream handlers to show detailed messages
+        err.response = errBody;
+        err.status = response.status;
+        // Log the backend error body for quicker debugging in the browser console (dev only)
+        try {
+          console.error('API Error body:', errBody);
+        } catch (_) {}
+        throw err;
       }
       
       // Handle 204 No Content
@@ -78,6 +125,15 @@ class GothamApiService {
 
       const contentType = response.headers.get('content-type') || '';
       const contentLength = Number(response.headers.get('content-length') || 0);
+
+      // If backend accidentally returns HTML (index.html) — likely a misconfigured base URL or proxy —
+      // fail fast with a useful error so devs can diagnose quickly.
+      if (contentType.toLowerCase().includes('html')) {
+        const text = await response.text();
+        const snippet = (text || '').toString().slice(0, 400).replace(/\s+/g, ' ').trim();
+        console.error(`API Error: received HTML from ${url}. This usually means the request hit the SPA dev server or the proxy failed. Response snippet:`, snippet);
+        throw new Error(`Unexpected HTML response from API at ${url}. Check API base URL and dev proxy. Response snippet: ${snippet}`);
+      }
 
       // If not JSON or empty body, try text and return {}
       if (!contentType.toLowerCase().includes('json') || contentLength === 0) {
@@ -176,6 +232,12 @@ class GothamApiService {
     const endpoint = API_CONFIG.ENDPOINTS.WORKINGTIME.BY_USER.replace(':userID', String(userID));
     const data = await this.request(endpoint);
     return Array.isArray(data) ? data : (data?.data || []);
+  }
+
+  // Create a new working time entry for a user
+  async createWorkingTime(userID, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.WORKINGTIME.BY_USER.replace(':userID', String(userID));
+    return await this.request(endpoint, { method: 'POST', body: JSON.stringify(payload) });
   }
 
   async logUnpaidOvertime(payload) {

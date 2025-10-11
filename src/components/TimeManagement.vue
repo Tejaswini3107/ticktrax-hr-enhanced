@@ -79,23 +79,61 @@ const normalize = (raw) => {
   const dateRaw = raw.date || raw.start_date || raw.day || '';
   const clockInRaw = raw.start_time || raw.clock_in || raw.in || '';
   const clockOutRaw = raw.end_time || raw.clock_out || raw.out || '';
+
+  // Parse base date
   const parsedDate = dateRaw ? new Date(dateRaw) : null;
-  const parsedTs = parsedDate && !isNaN(parsedDate.getTime()) ? parsedDate.getTime() : null;
-  const date = parsedTs ? formatIsoToLocal(parsedDate) : (dateRaw || '');
-  const clockIn = (clockInRaw && clockInRaw.includes('T')) ? formatIsoToLocal(clockInRaw) : (clockInRaw || '');
-  const clockOut = (clockOutRaw && clockOutRaw.includes('T')) ? formatIsoToLocal(clockOutRaw) : (clockOutRaw || '');
-  const hours = Number(raw.hours || raw.duration_hours || raw.duration || 0);
+  const parsedDateTs = parsedDate && !isNaN(parsedDate.getTime()) ? parsedDate.getTime() : null;
+
+  // Helper to build Date from either an ISO string or a time-only string combined with date
+  const makeDateFrom = (timeRaw) => {
+    if (!timeRaw) return null;
+    // If it's already a full ISO-like datetime
+    if (timeRaw.includes('T') || timeRaw.includes('-')) {
+      const d = new Date(timeRaw);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    // If we have a base date and a time-only value like '13:00'
+    if (parsedDateTs && /\d{1,2}:\d{2}/.test(timeRaw)) {
+      const iso = `${new Date(parsedDateTs).toISOString().split('T')[0]}T${timeRaw}`;
+      const d = new Date(iso);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    return null;
+  };
+
+  const inDate = makeDateFrom(clockInRaw);
+  const outDate = makeDateFrom(clockOutRaw);
+  const inTs = inDate ? inDate.getTime() : null;
+  let outTs = outDate ? outDate.getTime() : null;
+
+  // Handle overnight shifts where end is before start by assuming next day
+  if (inTs && outTs && outTs <= inTs) {
+    outTs += 24 * 60 * 60 * 1000; // add one day
+  }
+
+  const date = parsedDateTs ? formatIsoToLocal(parsedDate) : (dateRaw || '');
+  const clockIn = inTs ? formatIsoToLocal(inDate) : (clockInRaw || '');
+  const clockOut = outTs ? formatIsoToLocal(new Date(outTs)) : (clockOutRaw || '');
+
+  // Compute hours from timestamps when possible, else fall back to raw fields
+  let hoursNum = Number(raw.hours ?? raw.duration_hours ?? raw.duration ?? 0);
+  if (inTs && outTs && outTs > inTs) {
+    hoursNum = (outTs - inTs) / (1000 * 60 * 60);
+  }
+
   return {
     id: raw.id || `${date}:${clockIn}`,
     date,
     clockIn,
     clockOut,
-    hours: String(hours),
+    hours: String(Number(hoursNum.toFixed(2))),
     project: raw.project || raw.task || '',
     status: raw.status || (raw.approved ? 'approved' : raw.pending_approval ? 'pending' : 'pending'),
     isManual: Boolean(raw.is_manual || raw.isManual || raw.manual),
     justification: raw.justification || raw.reason || '',
-    _ts: parsedTs,
+    _ts: inTs || outTs || parsedDateTs || 0,
+    _in_ts: inTs,
+    _out_ts: outTs,
   };
 };
 
@@ -378,7 +416,7 @@ const stats = computed(() => ({
             </div>
 
             <!-- Filters -->
-            <div class="flex gap-4 items-center">
+            <!-- <div class="flex gap-4 items-center">
               <div class="flex items-center gap-2">
                 <Search class="h-4 w-4 text-muted-foreground" />
                 <Input
@@ -399,14 +437,14 @@ const stats = computed(() => ({
                   <SelectItem value="rejected">Rejected</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
+            </div> -->
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Project</TableHead>
+                  <!-- <TableHead>Date</TableHead>
+                  <TableHead>Project</TableHead> -->
                   <TableHead>Clock In</TableHead>
                   <TableHead>Clock Out</TableHead>
                   <TableHead>Hours</TableHead>
@@ -420,8 +458,8 @@ const stats = computed(() => ({
                   v-for="entry in filteredEntries"
                   :key="entry.id"
                 >
-                  <TableCell>{{ entry.date }}</TableCell>
-                  <TableCell>{{ entry.project }}</TableCell>
+                  <!-- <TableCell>{{ entry.date }}</TableCell>
+                  <TableCell>{{ entry.project }}</TableCell> -->
                   <TableCell>{{ entry.clockIn }}</TableCell>
                   <TableCell>{{ entry.clockOut }}</TableCell>
                   <TableCell>{{ entry.hours }}</TableCell>

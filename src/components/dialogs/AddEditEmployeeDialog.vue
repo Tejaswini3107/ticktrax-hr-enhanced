@@ -51,7 +51,6 @@ watch(() => props.employee, (newEmployee) => {
     location: newEmployee?.location || "",
     hireDate: newEmployee?.hireDate || "",
   };
-  try { console.debug('[AddEditEmployeeDialog] incoming employee:', newEmployee, 'formData:', formData.value); } catch (e) {}
 }, { immediate: true });
 
 const handleSubmit = async () => {

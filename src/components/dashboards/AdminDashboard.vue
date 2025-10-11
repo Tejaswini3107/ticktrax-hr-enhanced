@@ -71,8 +71,23 @@ const loadAdminData = async () => {
       try {
         const times = await apiService.getUserWorkingTimes(uid);
         const list = Array.isArray(times) ? times : [];
-        // Recent week hours
-        const weekly = list.slice(-7).reduce((acc, t) => acc + (Number(t.duration_hours || t.hours || 0) || 0), 0);
+        // Calculate week window (last 7 days)
+        const now = new Date();
+        const sevenDaysAgo = new Date(now);
+        sevenDaysAgo.setDate(now.getDate() - 7);
+
+        // Sum durations for entries whose start_time/timestamp falls within the last 7 days
+        const weekly = list.reduce((acc, t) => {
+          const ts = t.start_time || t.timestamp || t.created_at || t.date;
+          if (!ts) return acc;
+          const d = new Date(ts);
+          if (isNaN(d)) return acc;
+          if (d >= sevenDaysAgo && d <= now) {
+            return acc + (Number(t.duration_hours ?? t.hours ?? 0) || 0);
+          }
+          return acc;
+        }, 0);
+
         totalHours += weekly;
         dm.totalHours += weekly;
 
@@ -80,15 +95,26 @@ const loadAdminData = async () => {
         const empIdx = emps.findIndex(e => e.id === (uid || u.id));
         if (empIdx >= 0) emps[empIdx].hoursThisWeek = Math.round(weekly * 10) / 10;
 
-        // Active/clocked-in count
-        const activeNow = list.some(t => t.status === 'running' || t.status === 'in_progress');
+        // Active/clocked-in count: check if any recent entry is currently running
+        const activeNow = list.some(t => (t.status === 'running' || t.status === 'in_progress'));
         if (activeNow) {
           clockedInCount += 1;
           dm.activeToday += 1;
         }
 
-        // Collect recent activity entries
-        list.slice(-5).forEach(t => activities.push({ user: name, action: t.action || (t.status === 'running' ? 'clocked in' : 'timesheet'), details: t.location || t.type || (t.start_time || t.timestamp) || '', time: t.start_time || t.timestamp || '' }));
+        // Collect recent activity entries: use the most recent entries by timestamp
+        const recentSorted = list.slice().sort((a, b) => {
+          const at = new Date(a.start_time || a.timestamp || a.created_at || 0).getTime();
+          const bt = new Date(b.start_time || b.timestamp || b.created_at || 0).getTime();
+          return bt - at;
+        }).slice(0, 5);
+
+        recentSorted.forEach(t => activities.push({
+          user: name,
+          action: t.action || (t.status === 'running' ? 'clocked in' : 'timesheet'),
+          details: t.location || t.type || (t.start_time || t.timestamp) || '',
+          time: t.start_time || t.timestamp || t.created_at || ''
+        }));
       } catch (e) {
         console.warn('Failed loading working times for user', uid, e);
       }

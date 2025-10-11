@@ -54,14 +54,35 @@ const normalizeEntry = (raw) => {
   const dateRaw = raw.date || raw.start_date || raw.day || '';
   const clockInRaw = raw.start_time || raw.clock_in || raw.in || '';
   const clockOutRaw = raw.end_time || raw.clock_out || raw.out || '';
+
+  // Parse possible date and time fields into timestamps
   const parsedDate = dateRaw ? new Date(dateRaw) : null;
-  const parsedTs = parsedDate && !isNaN(parsedDate.getTime()) ? parsedDate.getTime() : null;
-  const date = parsedTs ? formatIsoToLocal(parsedDate) : (dateRaw || '');
-  const clockIn = (clockInRaw && clockInRaw.includes('T')) ? formatIsoToLocal(clockInRaw) : (clockInRaw || '');
-  const clockOut = (clockOutRaw && clockOutRaw.includes('T')) ? formatIsoToLocal(clockOutRaw) : (clockOutRaw || '');
-  const hours = Number(raw.hours || raw.duration_hours || raw.duration || 0);
+  const parsedDateTs = parsedDate && !isNaN(parsedDate.getTime()) ? parsedDate.getTime() : null;
+
+  const inDate = clockInRaw ? new Date(clockInRaw) : null;
+  const outDate = clockOutRaw ? new Date(clockOutRaw) : null;
+  const inTs = inDate && !isNaN(inDate.getTime()) ? inDate.getTime() : null;
+  const outTs = outDate && !isNaN(outDate.getTime()) ? outDate.getTime() : null;
+
+  // Prefer parsed date for the entry date, otherwise keep raw
+  const date = parsedDateTs ? formatIsoToLocal(parsedDate) : (dateRaw || '');
+
+  // Format clock in/out for display if parsable ISO-like; otherwise use raw
+  const clockIn = inTs ? formatIsoToLocal(inDate) : (clockInRaw || '');
+  const clockOut = outTs ? formatIsoToLocal(outDate) : (clockOutRaw || '');
+
+  // Compute hours from timestamps when possible, else fall back to raw fields
+  let hoursNum = Number(raw.hours ?? raw.duration_hours ?? raw.duration ?? 0);
+  if (inTs && outTs && outTs > inTs) {
+    hoursNum = (outTs - inTs) / (1000 * 60 * 60); // milliseconds -> hours
+  }
+
   const status = raw.status || (raw.approved ? 'approved' : raw.pending_approval ? 'pending' : 'pending');
-  return { date, clockIn, clockOut, hours: String(hours), status, _ts: parsedTs };
+
+  // _ts is used for sorting: prefer inTs, then outTs, then parsedDateTs
+  const sortTs = inTs || outTs || parsedDateTs || 0;
+
+  return { date, clockIn, clockOut, hours: String(Number(hoursNum.toFixed(2))), status, _ts: sortTs, _in_ts: inTs, _out_ts: outTs };
 };
 
 const computeStats = (entries) => {
@@ -101,8 +122,9 @@ const loadDashboard = async () => {
     if (!user || !user.id) throw new Error('No authenticated user');
     const data = await apiService.getUserWorkingTimes(user.id);
     const entries = Array.isArray(data) ? data : (data?.data || []);
-    const normalized = entries.map(normalizeEntry).sort((a,b) => (a.date < b.date ? 1 : -1));
-    recentEntries.value = normalized.slice(0, 10);
+  // Sort entries in chronological order (oldest first) using numeric timestamp
+  const normalized = entries.map(normalizeEntry).sort((a, b) => (Number(a._ts || 0) - Number(b._ts || 0)));
+  recentEntries.value = normalized.slice(-10); // keep the most recent 10 (chronological order)
     computeStats(normalized);
   } catch (err) {
     console.error('Load dashboard failed', err);
