@@ -19,6 +19,8 @@
   <meta name="apple-mobile-web-app-title" content="TickTrax">
   <meta name="format-detection" content="telephone=no">
   <meta name="msapplication-tap-highlight" content="no">
+  <!-- Cordova: allow local file access and viewport settings for mobile webview -->
+  <meta http-equiv="Content-Security-Policy" content="default-src * 'self' data: gap: https: 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' data:; script-src 'self' 'unsafe-inline' 'unsafe-eval' data:; connect-src *; img-src * data:;">
   
   <!-- Splash Screen Prevention -->
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -32,7 +34,7 @@
   <link rel="manifest" href="/manifest.json">
   
   <!-- Preload Critical Resources -->
-  <link rel="modulepreload" href="data:text/javascript;base64,aW1wb3J0IHsgY3JlYXRlQXBwIH0gZnJvbSAndnVlJzsNCmltcG9ydCBBcHAgZnJvbSAnLi9BcHAudnVlJzsNCmltcG9ydCAnLi9pbmRleC5jc3MnOw0KaW1wb3J0ICcuL3N0eWxlcy9tb2JpbGUuY3NzJzsNCg0KY29uc3QgYXBwID0gY3JlYXRlQXBwKEFwcCk7DQoNCi8vIFJlbW92ZSBsb2FkaW5nIHNjcmVlbiB3aGVuIGFwcCBpcyByZWFkeQ0KYXBwLm1vdW50KCcjYXBwJyk7DQoNCi8vIFJlbW92ZSBsb2FkaW5nIHNjcmVlbiBhZnRlciBtb3VudA0KZG9jdW1lbnQucXVlcnlTZWxlY3RvcignLmFwcC1sb2FkaW5nJyk/LnJlbW92ZSgpOw0K">
+  <link rel="modulepreload" href="data:text/javascript;base64,aW1wb3J0IHsgY3JlYXRlQXBwIH0gZnJvbSAndnVlJzsNCmltcG9ydCBBcHAgZnJvbSAnLi9BcHAudnVlJzsNCmltcG9ydCAnLi9pbmRleC5jc3MnOw0KaW1wb3J0ICcuL3N0eWxlcy9tb2JpbGUuY3NzJzsNCg0KaW1wb3J0IGFwaVNlcnZpY2UgZnJvbSAnLi9zZXJ2aWNlcy9hcGlTZXJ2aWNlLmpzJzsNCmltcG9ydCBhdXRoTWFuYWdlciBmcm9tICcuL3NlcnZpY2VzL2F1dGhTZXJ2aWNlLmpzJzsNCg0KY29uc3QgYXBwID0gY3JlYXRlQXBwKEFwcCk7DQoNCi8vIEluaXRpYWxpemUgc3RvcmVkIHRva2VucyBzbyBhcGlTZXJ2aWNlIGhhcyBqd3QveHNyZiBhdmFpbGFibGUgYmVmb3JlIHJvdXRpbmcNCnRyeSB7DQoJaWYgKGFwaVNlcnZpY2UgJiYgdHlwZW9mIGFwaVNlcnZpY2UuaW5pdGlhbGl6ZVRva2VucyA9PT0gJ2Z1bmN0aW9uJykgew0KCQlhcGlTZXJ2aWNlLmluaXRpYWxpemVUb2tlbnMoKTsNCgl9DQp9IGNhdGNoIChlKSB7DQoJY29uc29sZS53YXJuKCdUb2tlbiBpbml0aWFsaXphdGlvbiBmYWlsZWQ6JywgZSk7DQp9DQoNCi8vIFdhcm0gY3VycmVudCB1c2VyICh0cnkgQVBJIHRoZW4gbG9jYWxTdG9yYWdlKSB0byBhdm9pZCByZWZyZXNoIHJhY2UgdGhhdCByZWRpcmVjdHMgdG8gbG9naW4NCihhc3luYyAoKSA9PiB7DQoJdHJ5IHsNCgkJYXdhaXQgYXV0aE1hbmFnZXIuZ2V0Q3VycmVudFVzZXIoKTsNCgl9IGNhdGNoIChlKSB7DQoJCS8vIGlnbm9yZSAtIGdldEN1cnJlbnRVc2VyIGlzIHJlc2lsaWVudCBhbmQgd2lsbCBmYWxsYmFjaw0KCX0gZmluYWxseSB7DQoJCS8vIE1vdW50IGFwcCBhZnRlciBhdXRoIHdhcm0tdXAgc28gcm91dGVyIGd1YXJkcyBzZWUgY29ycmVjdCBzdGF0ZQ0KCQlhcHAubW91bnQoJyNhcHAnKTsNCgkJLy8gUmVtb3ZlIGxvYWRpbmcgc2NyZWVuIGFmdGVyIG1vdW50DQoJCWRvY3VtZW50LnF1ZXJ5U2VsZWN0b3IoJy5hcHAtbG9hZGluZycpPy5yZW1vdmUoKTsNCgl9DQp9KSgpOw0K">
   
   <!-- Prevent Flash of Unstyled Content -->
   <style>
@@ -97,8 +99,8 @@
       font-size: 16px !important;
     }
   </style>
-  <script type="module" crossorigin src="/assets/index-BfvOiHYr.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-NCwpl0rP.css">
+  <script type="module" crossorigin src="/assets/index-CI20iXyj.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-CsTrX3j_.css">
 </head>
 
 <body>
@@ -123,6 +125,20 @@
       });
     }
   </script>
-  
+  <!-- Cordova script for native bridges (Cordova injects cordova.js at runtime in the native app) -->
+  <script>
+    // Only attempt to load cordova.js when running inside Cordova (file protocol or mobile environment)
+    try {
+      if (window.location.protocol === 'file:' || /cordova/i.test(navigator.userAgent || '')) {
+        var s = document.createElement('script');
+        s.src = 'cordova.js';
+        s.async = false;
+        document.body.appendChild(s);
+      }
+    } catch (e) {
+      // ignore
+    }
+  </script>
+
 </body>
 </html>  

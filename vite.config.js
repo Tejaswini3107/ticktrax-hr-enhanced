@@ -15,7 +15,8 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
-    outDir: 'build',
+    // Output to Cordova's www folder so the mobile project can serve the built files
+    outDir: 'www',
     sourcemap: true,
   },
   server: {

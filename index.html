@@ -19,6 +19,8 @@
   <meta name="apple-mobile-web-app-title" content="TickTrax">
   <meta name="format-detection" content="telephone=no">
   <meta name="msapplication-tap-highlight" content="no">
+  <!-- Cordova: allow local file access and viewport settings for mobile webview -->
+  <meta http-equiv="Content-Security-Policy" content="default-src * 'self' data: gap: https: 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' data:; script-src 'self' 'unsafe-inline' 'unsafe-eval' data:; connect-src *; img-src * data:;">
   
   <!-- Splash Screen Prevention -->
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -123,7 +125,21 @@
       });
     }
   </script>
-  
+  <!-- Cordova script for native bridges (Cordova injects cordova.js at runtime in the native app) -->
+  <script>
+    // Only attempt to load cordova.js when running inside Cordova (file protocol or mobile environment)
+    try {
+      if (window.location.protocol === 'file:' || /cordova/i.test(navigator.userAgent || '')) {
+        var s = document.createElement('script');
+        s.src = 'cordova.js';
+        s.async = false;
+        document.body.appendChild(s);
+      }
+    } catch (e) {
+      // ignore
+    }
+  </script>
+
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>  
