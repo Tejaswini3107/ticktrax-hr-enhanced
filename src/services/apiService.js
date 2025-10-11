@@ -202,6 +202,17 @@ class GothamApiService {
     return Array.isArray(data) ? data : (data?.data || []);
   }
 
+  // Create a new user (matches POST /users)
+  async createUser(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.USERS.LIST, { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  // Update an existing user (PUT /users/:id)
+  async updateUser(userId, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.USERS.BY_ID.replace(':id', String(userId));
+    return await this.request(endpoint, { method: 'PUT', body: JSON.stringify(payload) });
+  }
+
   async getUserById(id) {
     const endpoint = API_CONFIG.ENDPOINTS.USERS.BY_ID.replace(':id', String(id));
     return await this.request(endpoint);

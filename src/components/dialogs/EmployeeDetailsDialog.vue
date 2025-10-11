@@ -12,8 +12,11 @@
             <User class="h-6 w-6 text-primary" />
           </div>
           <div>
-            <div>{{ employee.name }}</div>
-            <DialogDescription>{{ employee.id }}</DialogDescription>
+            <div class="font-medium">{{ employee.name }}</div>
+            <DialogDescription>
+              <div class="text-sm text-muted-foreground">{{ email }}</div>
+              <div class="text-sm text-muted-foreground mt-1">ID: {{ employee.id }}</div>
+            </DialogDescription>
           </div>
         </DialogTitle>
       </DialogHeader>

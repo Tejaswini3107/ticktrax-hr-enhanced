@@ -12,7 +12,7 @@ import AdminReports from "../reports/AdminReports.vue";
 import HelpCenter from "../help/HelpCenter.vue";
 import EmployeeDetailsDialog from "../dialogs/EmployeeDetailsDialog.vue";
 import AddEditEmployeeDialog from "../dialogs/AddEditEmployeeDialog.vue";
-import AddUserDialog from "../dialogs/AddUserDialog.vue";
+// AddUserDialog intentionally not used for employee edits; local AddEditEmployeeDialog is used instead
 import GenerateReportDialog from "../dialogs/GenerateReportDialog.vue";
 import ExportDataDialog from "../dialogs/ExportDataDialog.vue";
 import WorkWeekSettingsDialog from "../dialogs/WorkWeekSettingsDialog.vue";
@@ -30,7 +30,7 @@ const isAddEditOpen = ref(false);
 const editingEmployee = ref(null);
 const isReportOpen = ref(false);
 const isExportOpen = ref(false);
-const isAddUserOpen = ref(false);
+// removed isAddUserOpen (we use isAddEditOpen for add/edit employee flows)
 const isWorkWeekOpen = ref(false);
 const employees = ref([]);
 const departmentStats = ref([]);
@@ -60,8 +60,8 @@ const loadAdminData = async () => {
       const dept = u.department || u.attributes?.department || 'Unknown';
       const status = (u.active === false || u.attributes?.active === false) ? 'inactive' : 'active';
 
-      // default employee entry
-      emps.push({ id: uid || u.id || u.user_id || Math.random().toString(36).slice(2,9), name, department: dept, role, status, hoursThisWeek: 0, type: u.attributes?.type || 'Regular' });
+  // default employee entry
+  emps.push({ id: uid || u.id || u.user_id || Math.random().toString(36).slice(2,9), name, email: u.attributes?.personal_email || u.attributes?.email || u.email || '', department: dept, role, status, hoursThisWeek: 0, type: u.attributes?.type || 'Regular' });
 
       // aggregate per-department
       if (!deptMap.has(dept)) deptMap.set(dept, { department: dept, employees: 0, activeToday: 0, totalHours: 0 });
@@ -77,13 +77,45 @@ const loadAdminData = async () => {
         sevenDaysAgo.setDate(now.getDate() - 7);
 
         // Sum durations for entries whose start_time/timestamp falls within the last 7 days
+        // Helper to compute hours for a single entry robustly
+        const computeEntryHours = (t) => {
+          // Try explicit hour-like fields first
+          const hourFields = [t.duration_hours, t.hours, t.hours_total, t.duration, t.total_hours];
+          for (const v of hourFields) {
+            const n = Number(v);
+            if (!isNaN(n) && n !== 0) return n;
+          }
+
+          // Try minute-like fields
+          const minuteFields = [t.duration_minutes, t.minutes, t.total_minutes];
+          for (const v of minuteFields) {
+            const n = Number(v);
+            if (!isNaN(n) && n !== 0) return n / 60;
+          }
+
+          // Fallback: compute from start/end timestamps (handle running entries)
+          const s = t.start_time || t.timestamp || t.created_at || t.start || t.date;
+          const e = t.end_time || t.stop_time || t.updated_at || t.end || t.stopped_at;
+          if (!s) return 0;
+          const sd = new Date(s);
+          if (isNaN(sd)) return 0;
+          let ed = e ? new Date(e) : null;
+          if ((!ed || isNaN(ed)) && (t.status === 'running' || t.status === 'in_progress' || t.status === 'active')) {
+            ed = now; // running entry — count up to now
+          }
+          if (!ed || isNaN(ed)) return 0;
+          const diffHours = (ed.getTime() - sd.getTime()) / (1000 * 60 * 60);
+          return diffHours > 0 ? diffHours : 0;
+        };
+
+        // Sum hours for entries that start within the 7-day window
         const weekly = list.reduce((acc, t) => {
-          const ts = t.start_time || t.timestamp || t.created_at || t.date;
-          if (!ts) return acc;
-          const d = new Date(ts);
-          if (isNaN(d)) return acc;
-          if (d >= sevenDaysAgo && d <= now) {
-            return acc + (Number(t.duration_hours ?? t.hours ?? 0) || 0);
+          const s = t.start_time || t.timestamp || t.created_at || t.start || t.date;
+          if (!s) return acc;
+          const sd = new Date(s);
+          if (isNaN(sd)) return acc;
+          if (sd >= sevenDaysAgo && sd <= now) {
+            return acc + computeEntryHours(t);
           }
           return acc;
         }, 0);
@@ -91,12 +123,19 @@ const loadAdminData = async () => {
         totalHours += weekly;
         dm.totalHours += weekly;
 
-        // Update employee hours
-        const empIdx = emps.findIndex(e => e.id === (uid || u.id));
+        // Update employee hours (ensure we match the id we used when creating the row)
+        const empIdx = emps.findIndex(e => e.id === (uid || u.id || u.user_id));
         if (empIdx >= 0) emps[empIdx].hoursThisWeek = Math.round(weekly * 10) / 10;
 
-        // Active/clocked-in count: check if any recent entry is currently running
-        const activeNow = list.some(t => (t.status === 'running' || t.status === 'in_progress'));
+        // Active/clocked-in count: check if any recent entry is currently running (or missing an end)
+        const activeNow = list.some(t => {
+          if (t.status === 'running' || t.status === 'in_progress') return true;
+          // if no explicit end/stop time and a start exists and it's recent, consider it running
+          const s = t.start_time || t.timestamp || t.created_at || t.start || t.date;
+          const e = t.end_time || t.stop_time || t.updated_at || t.end || t.stopped_at;
+          if (s && !e) return true;
+          return false;
+        });
         if (activeNow) {
           clockedInCount += 1;
           dm.activeToday += 1;
@@ -150,43 +189,14 @@ const handleViewEmployee = (employee) => {
 };
 
 const handleAddUser = () => {
-  isAddUserOpen.value = true;
+  // Open the local Add/Edit Employee dialog for creating a new employee
+  editingEmployee.value = null;
+  isAddEditOpen.value = true;
 };
 
 const handleEditEmployee = (employee) => {
-  // Support multiple API shapes: flat, { attributes }, or { data: { ... } }
-  const src = employee?.data || employee?.attributes || employee || {};
-
-  const id = src.id ?? employee?.id ?? employee?.user_id ?? (employee && String(employee)) ?? '';
-
-  // Build full name if first_name/last_name exist, otherwise fall back to name or username/email
-  const firstName = src.first_name ?? src.firstName ?? '';
-  const lastName = src.last_name ?? src.lastName ?? '';
-  const nameFromParts = firstName || lastName ? `${firstName} ${lastName}`.trim() : '';
-  const name = nameFromParts || src.name || src.username || src.email || '';
-
-  const email = src.email ?? employee?.email ?? '';
-  const department = src.department ?? '';
-
-  // Normalize role to a simple lowercase token the dialog expects
-  const rawRole = (src.role ?? employee?.role ?? '') || 'employee';
-  const role = String(rawRole).toLowerCase() === 'employee' ? 'employee' : String(rawRole).toLowerCase();
-
-  const status = (src.active === false || employee?.active === false) ? 'inactive' : (src.status ?? employee?.status ?? 'active');
-  const hoursThisWeek = src.hoursThisWeek ?? src.hours ?? 0;
-  const type = src.type ?? 'Regular';
-
-  editingEmployee.value = {
-    id,
-    name,
-    email,
-    department,
-    role,
-    status,
-    hoursThisWeek,
-    type,
-  };
-
+  // Open the Add/Edit Employee dialog (local form) and prefill with the selected employee
+  editingEmployee.value = employee;
   isAddEditOpen.value = true;
 };
 
@@ -200,9 +210,35 @@ const handleSaveEmployee = (employeeData) => {
 };
 
 const handleSaveUser = (userData) => {
-  toast.success("User created successfully!");
-  isAddUserOpen.value = false;
+  // Normalize server response and either insert or replace existing employee
+  try {
+    const src = userData?.data || userData || {};
+    const uid = src.id || src.user_id || src.id || Math.random().toString(36).slice(2,9);
+  const name = src.first_name ? `${src.first_name} ${src.last_name || ''}`.trim() : (src.name || src.email || `User ${uid}`);
+    const dept = src.department || 'Unknown';
+    const role = src.role || 'employee';
+    const status = src.active === false ? 'inactive' : 'active';
+  const updatedEmp = { id: uid, name, email: src.personal_email || src.email || src.attributes?.personal_email || src.attributes?.email || '', department: dept, role, status, hoursThisWeek: 0, type: src.type || 'Regular' };
+
+    // If we were editing, replace the existing employee entry
+    const editIdx = employees.value.findIndex(e => e.id === (editingEmployee.value?.id || editingEmployee.value?.user_id || editingEmployee.value));
+    if (editingEmployee.value?._editing && editIdx >= 0) {
+      employees.value.splice(editIdx, 1, updatedEmp);
+      toast.success('User updated successfully!');
+    } else {
+      employees.value = [updatedEmp, ...employees.value];
+      summary.value.totalEmployees = (summary.value.totalEmployees || 0) + 1;
+      toast.success('User created successfully!');
+    }
+  } catch (e) {
+    console.warn('Failed to insert/replace created user into list', e);
+    toast.success('User saved (server response) — refresh to see updates.');
+  }
+  // clear editing marker
+  if (editingEmployee.value) delete editingEmployee.value._editing;
+  // isAddUserOpen no longer used
 };
+
 </script>
 
 <template>
@@ -211,7 +247,7 @@ const handleSaveUser = (userData) => {
       <div class="flex items-center justify-between">
         <div>
           <h2>Employee Management</h2>
-          <p class="text-muted-foreground mt-1">Manage all employees across departments</p>
+          <p class="text-muted-foreground mt-1">Manage all employees</p>
         </div>
         <div class="flex gap-2">
           <Button class="gap-2" @click="handleAddUser">
@@ -220,7 +256,7 @@ const handleSaveUser = (userData) => {
           </Button>
         </div>
       </div>
-      <div class="flex gap-4">
+      <!-- <div class="flex gap-4">
         <div class="relative flex-1">
           <Search class="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
           <Input placeholder="Search employees..." class="pl-10" />
@@ -229,20 +265,19 @@ const handleSaveUser = (userData) => {
           <Filter class="h-4 w-4" />
           Filter
         </Button>
-      </div>
+      </div> -->
       <Card>
         <CardContent class="p-0">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Employee</TableHead>
-                <TableHead>Department</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Hours This Week</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
+                  <TableHead>Employee</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Hours This Week</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
             </TableHeader>
             <TableBody>
               <TableRow v-for="employee in employees" :key="employee.id">
@@ -252,7 +287,11 @@ const handleSaveUser = (userData) => {
                     <p class="text-sm text-muted-foreground">{{ employee.id }}</p>
                   </div>
                 </TableCell>
-                <TableCell>{{ employee.department }}</TableCell>
+                <TableCell>
+                  <div>
+                    <p class="text-sm">{{ employee.email || '—' }}</p>
+                  </div>
+                </TableCell>
                 <TableCell>
                   <Badge :variant="employee.role === 'manager' ? 'default' : 'secondary'">{{ employee.role }}</Badge>
                 </TableCell>
@@ -262,15 +301,10 @@ const handleSaveUser = (userData) => {
                   </Badge>
                 </TableCell>
                 <TableCell>{{ employee.hoursThisWeek }}h</TableCell>
-                <TableCell>
-                  <div class="flex items-center gap-1">
-                    <MapPin v-if="employee.type === 'Field Worker'" class="h-3 w-3 text-blue-500" />
-                    {{ employee.type }}
-                  </div>
-                </TableCell>
+                
                 <TableCell>
                   <div class="flex gap-2">
-                    <Button variant="ghost" size="sm" @click="handleViewEmployee(employee)">View</Button>
+                    <!-- <Button variant="ghost" size="sm" @click="handleViewEmployee(employee)">View</Button> -->
                     <Button variant="ghost" size="sm" @click="handleEditEmployee(employee)">Edit</Button>
                   </div>
                 </TableCell>
@@ -281,7 +315,6 @@ const handleSaveUser = (userData) => {
       </Card>
     </div>
   <EmployeeDetailsDialog :employee="selectedEmployee" :open="isDetailsOpen" @update:open="isDetailsOpen = $event" />
-  <AddUserDialog :open="isAddUserOpen" @update:open="isAddUserOpen = $event" @save="handleSaveUser" />
   <!-- Add/Edit dialog must be present in the employees view so handleEditEmployee can open it -->
   <AddEditEmployeeDialog :employee="editingEmployee" :open="isAddEditOpen" @update:open="isAddEditOpen = $event" @save="handleSaveEmployee" />
   </div>
@@ -517,7 +550,6 @@ const handleSaveUser = (userData) => {
     <AddEditEmployeeDialog :employee="editingEmployee" :open="isAddEditOpen" @update:open="isAddEditOpen = $event" @save="handleSaveEmployee" />
     <GenerateReportDialog :open="isReportOpen" @update:open="isReportOpen = $event" reportType="hr" />
     <ExportDataDialog :open="isExportOpen" @update:open="isExportOpen = $event" dataType="admin" />
-    <AddUserDialog :open="isAddUserOpen" @update:open="isAddUserOpen = $event" @save="handleSaveUser" />
     <WorkWeekSettingsDialog :open="isWorkWeekOpen" @update:open="isWorkWeekOpen = $event" @save="(settings) => { console.log('Work week settings saved:', settings); toast.success('Work week settings updated successfully!'); }" />
   </div>
 </template>

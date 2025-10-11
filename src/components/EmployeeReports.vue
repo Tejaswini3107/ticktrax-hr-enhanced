@@ -88,8 +88,38 @@ const loadReportData = async () => {
     const cur = await authManager.getCurrentUser();
     if (!cur.success) throw new Error('Not signed in');
     const user = cur.data;
-    const data = await apiService.getUserWorkingTimes(user.id);
-    const rows = Array.isArray(data) ? data : (data?.data || []);
+    // Prefer server-side payroll/report aggregation when available.
+    // Try the payroll report endpoint first (may return totals, rows or a data wrapper).
+    let payrollResp = null;
+    let rows = [];
+    try {
+      payrollResp = await apiService.getPayrollReport(user.id, {
+        period: selectedPeriod.value,
+        start: startDate.value || undefined,
+        end: endDate.value || undefined,
+      });
+
+      // payrollResp may be an array of rows, or an object with { rows, data, totals }
+      if (Array.isArray(payrollResp)) {
+        rows = payrollResp;
+      } else if (payrollResp?.rows && Array.isArray(payrollResp.rows)) {
+        rows = payrollResp.rows;
+      } else if (payrollResp?.data && Array.isArray(payrollResp.data)) {
+        rows = payrollResp.data;
+      } else if (payrollResp?.items && Array.isArray(payrollResp.items)) {
+        rows = payrollResp.items;
+      } else {
+        // unexpected shape - fallback to working times endpoint
+        payrollResp = null;
+        const data = await apiService.getUserWorkingTimes(user.id);
+        rows = Array.isArray(data) ? data : (data?.data || []);
+      }
+    } catch (e) {
+      // payroll endpoint may not exist on some backends; fallback to raw working times
+      console.warn('Payroll report API failed, falling back to working times:', e);
+      const data = await apiService.getUserWorkingTimes(user.id);
+      rows = Array.isArray(data) ? data : (data?.data || []);
+    }
     detailedTimeEntries.value = rows.map(r => ({
       date: formatIso(r.start_time || r.timestamp),
       project: r.project || r.task || '—',
