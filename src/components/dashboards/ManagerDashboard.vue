@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import Card from "../ui/card.vue";
 import { CardContent, CardHeader, CardTitle } from "../ui/card-components.vue";
 import Button from "../ui/button.vue";
@@ -13,6 +13,9 @@ import GenerateReportDialog from "../dialogs/GenerateReportDialog.vue";
 import ExportDataDialog from "../dialogs/ExportDataDialog.vue";
 import AddTeamMemberDialog from "../dialogs/AddTeamMemberDialog.vue";
 import { toast } from 'vue-sonner';
+import realTimeService from '../../services/realTimeService.js';
+import { apiService } from '../../services/apiService.js';
+import authManager from '../../services/authService.js';
 
 const props = defineProps({
   currentView: String
@@ -23,28 +26,100 @@ const isApprovalOpen = ref(false);
 const isReportOpen = ref(false);
 const isExportOpen = ref(false);
 const isAddTeamMemberOpen = ref(false);
+const isLoading = ref(false);
 
-const pendingApprovals = [
-  { employee: "John Smith", date: "2025-10-01", hours: "8.5", type: "Regular", reason: "-" },
-  { employee: "Sarah Johnson", date: "2025-09-30", hours: "10.0", type: "Overtime", reason: "Project deadline" },
-  { employee: "Mike Davis", date: "2025-09-29", hours: "8.0", type: "Manual Entry", reason: "Forgot to clock out" },
-];
+// API-driven data
+const pendingApprovals = ref([]);
+const teamStats = ref([]);
+const teamMembers = ref([]);
+const alerts = ref([]);
+const dashboardStats = ref({
+  totalTeamMembers: 0,
+  activeToday: 0,
+  pendingApprovals: 0,
+  teamProductivity: 0
+});
 
-const teamStats = [
-  { name: "John Smith", hoursWeek: 42, status: "On Time" },
-  { name: "Sarah Johnson", hoursWeek: 45, status: "Overtime" },
-  { name: "Mike Davis", hoursWeek: 38, status: "On Time" },
-  { name: "Emily Brown", hoursWeek: 40, status: "On Time" },
-];
-
-const alerts = [
-  { type: "Night Shift", message: "Sarah Johnson worked 3 consecutive nights", severity: "warning" },
-  { type: "Missing", message: "2 employees missing clock-out", severity: "error" },
-  { type: "Overtime", message: "Team overtime at 115% this week", severity: "warning" },
-];
+// Load dashboard data from API
+const loadDashboard = async () => {
+  isLoading.value = true;
+  console.log('📊 Manager Dashboard: Loading data from API...');
+  
+  try {
+    const user = await authManager.getCurrentUser();
+    console.log('📊 Current user:', user);
+    
+    // Load pending approvals
+    console.log('📊 Fetching pending approvals...');
+    const approvalsRes = await apiService.getPendingApprovals();
+    console.log('📊 Approvals response:', approvalsRes);
+    
+    if (approvalsRes && Array.isArray(approvalsRes)) {
+      pendingApprovals.value = approvalsRes.map(entry => ({
+        id: entry.id,
+        employee: `${entry.user?.first_name || ''} ${entry.user?.last_name || ''}`.trim() || entry.user?.username || 'Unknown',
+        date: entry.date || entry.start_date || new Date().toISOString().split('T')[0],
+        hours: (entry.duration_hours || entry.hours || 0).toFixed(1),
+        type: entry.type || (entry.duration_hours > 8 ? 'Overtime' : 'Regular'),
+        reason: entry.notes || entry.reason || '-',
+        entry_id: entry.id
+      }));
+    }
+    
+    // Load team stats
+    const teamRes = await apiService.getTeamMembers();
+    if (teamRes && Array.isArray(teamRes)) {
+      teamMembers.value = teamRes;
+      teamStats.value = teamRes.map(member => ({
+        name: `${member.first_name || ''} ${member.last_name || ''}`.trim() || member.username,
+        hoursWeek: member.hours_this_week || 0,
+        status: (member.hours_this_week > 45 ? 'Overtime' : 'On Time')
+      }));
+    }
+    
+    // Get analytics data
+    try {
+      const analyticsRes = await apiService.getAnalyticsOverview();
+      if (analyticsRes) {
+        dashboardStats.value = {
+          totalTeamMembers: teamMembers.value.length,
+          activeToday: analyticsRes.active_today || 0,
+          pendingApprovals: pendingApprovals.value.length,
+          teamProductivity: analyticsRes.productivity_score || 85
+        };
+      }
+    } catch (e) {
+      console.log('Analytics not available:', e);
+    }
+    
+    // Load alerts/notifications
+    try {
+      const notificationsRes = await apiService.getNotifications();
+      if (notificationsRes && Array.isArray(notificationsRes)) {
+        alerts.value = notificationsRes
+          .filter(n => n.type === 'alert' || n.priority === 'high')
+          .slice(0, 5)
+          .map(n => ({
+            type: n.category || 'Alert',
+            message: n.message,
+            severity: n.priority === 'high' ? 'error' : 'warning'
+          }));
+      }
+    } catch (e) {
+      console.log('Notifications not available:', e);
+    }
+    
+  } catch (error) {
+    console.error('Error loading manager dashboard:', error);
+    toast.error('Failed to load dashboard data');
+  } finally {
+    isLoading.value = false;
+  }
+};
 
 const handleReviewEntry = (entry) => {
   const timeEntry = {
+    id: entry.entry_id || entry.id,
     employee: entry.employee,
     date: entry.date,
     clockIn: "08:00 AM",
@@ -58,15 +133,83 @@ const handleReviewEntry = (entry) => {
   isApprovalOpen.value = true;
 };
 
-const handleApprove = (notes) => {
-  toast.success("Time entry approved successfully!");
-  isApprovalOpen.value = false;
+const handleApprove = async (notes) => {
+  if (!selectedEntry.value || !selectedEntry.value.id) {
+    toast.error("Invalid entry");
+    return;
+  }
+  
+  try {
+    await apiService.approveTimeEntry(selectedEntry.value.id, { notes });
+    toast.success("Time entry approved successfully!");
+    isApprovalOpen.value = false;
+    loadDashboard(); // Reload data
+  } catch (error) {
+    console.error('Error approving entry:', error);
+    toast.error("Failed to approve entry");
+  }
 };
 
-const handleReject = (reason) => {
-  toast.error("Time entry rejected");
-  isApprovalOpen.value = false;
+const handleReject = async (reason) => {
+  if (!selectedEntry.value || !selectedEntry.value.id) {
+    toast.error("Invalid entry");
+    return;
+  }
+  
+  try {
+    await apiService.rejectTimeEntry(selectedEntry.value.id, { reason });
+    toast.error("Time entry rejected");
+    isApprovalOpen.value = false;
+    loadDashboard(); // Reload data
+  } catch (error) {
+    console.error('Error rejecting entry:', error);
+    toast.error("Failed to reject entry");
+  }
 };
+
+// Setup realtime updates
+onMounted(() => {
+  console.log('📡 Manager Dashboard: Setting up realtime listeners');
+  
+  // Load initial data
+  loadDashboard();
+  
+  // Listen for team member status updates
+  const handleTeamMemberOnline = (data) => {
+    console.log('📡 Realtime: Team member online', data);
+    toast.success(`${data.name} is now online`);
+  };
+  
+  const handleTeamMemberOffline = (data) => {
+    console.log('📡 Realtime: Team member offline', data);
+    toast.info(`${data.name} went offline`);
+  };
+  
+  const handleTeamStatsUpdated = (data) => {
+    console.log('📡 Realtime: Team stats updated', data);
+    loadDashboard(); // Reload data
+  };
+  
+  const handleNewApprovalRequest = (data) => {
+    console.log('📡 Realtime: New approval request', data);
+    toast.info('New time entry requires approval');
+    loadDashboard(); // Reload data
+  };
+  
+  // Register listeners
+  realTimeService.on('team_member_online', handleTeamMemberOnline);
+  realTimeService.on('team_member_offline', handleTeamMemberOffline);
+  realTimeService.on('team_stats_updated', handleTeamStatsUpdated);
+  realTimeService.on('approval-request', handleNewApprovalRequest);
+  
+  onUnmounted(() => {
+    // Cleanup listeners
+    realTimeService.off('team_member_online', handleTeamMemberOnline);
+    realTimeService.off('team_member_offline', handleTeamMemberOffline);
+    realTimeService.off('team_stats_updated', handleTeamStatsUpdated);
+    realTimeService.off('approval-request', handleNewApprovalRequest);
+  });
+});
 
 const handleBulkApprove = () => {
   toast.success(`${pendingApprovals.length} time entries approved successfully!`);
@@ -207,13 +350,16 @@ const handleAddTeamMember = (employee) => {
   </div>
 
   <div v-else class="space-y-6">
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div v-if="isLoading" class="text-center py-8">
+      <p class="text-muted-foreground">Loading dashboard...</p>
+    </div>
+    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
       <Card>
         <CardContent class="pt-6">
           <div class="flex items-center justify-between">
             <div>
               <p class="text-sm text-muted-foreground">Team Members</p>
-              <p class="text-2xl mt-1">24</p>
+              <p class="text-2xl mt-1">{{ dashboardStats.totalTeamMembers }}</p>
             </div>
             <div class="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
               <Users class="h-6 w-6 text-primary" />
@@ -226,7 +372,7 @@ const handleAddTeamMember = (employee) => {
           <div class="flex items-center justify-between">
             <div>
               <p class="text-sm text-muted-foreground">Pending Approvals</p>
-              <p class="text-2xl mt-1">12</p>
+              <p class="text-2xl mt-1">{{ dashboardStats.pendingApprovals }}</p>
             </div>
             <div class="w-12 h-12 bg-yellow-500/10 rounded-lg flex items-center justify-center">
               <Clock class="h-6 w-6 text-yellow-600 dark:text-yellow-500" />
@@ -239,7 +385,7 @@ const handleAddTeamMember = (employee) => {
           <div class="flex items-center justify-between">
             <div>
               <p class="text-sm text-muted-foreground">Active Alerts</p>
-              <p class="text-2xl mt-1">3</p>
+              <p class="text-2xl mt-1">{{ alerts.length }}</p>
             </div>
             <div class="w-12 h-12 bg-red-500/10 rounded-lg flex items-center justify-center">
               <AlertTriangle class="h-6 w-6 text-red-600 dark:text-red-500" />
@@ -251,8 +397,8 @@ const handleAddTeamMember = (employee) => {
         <CardContent class="pt-6">
           <div class="flex items-center justify-between">
             <div>
-              <p class="text-sm text-muted-foreground">Team Hours</p>
-              <p class="text-2xl mt-1">952</p>
+              <p class="text-sm text-muted-foreground">Active Today</p>
+              <p class="text-2xl mt-1">{{ dashboardStats.activeToday }}</p>
             </div>
             <div class="w-12 h-12 bg-green-500/10 rounded-lg flex items-center justify-center">
               <TrendingUp class="h-6 w-6 text-green-600 dark:text-green-500" />

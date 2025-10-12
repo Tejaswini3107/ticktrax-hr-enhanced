@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import Card from "../ui/card.vue";
 import { CardContent, CardHeader, CardTitle } from "../ui/card-components.vue";
 import Button from "../ui/button.vue";
@@ -17,6 +17,9 @@ import GenerateReportDialog from "../dialogs/GenerateReportDialog.vue";
 import ExportDataDialog from "../dialogs/ExportDataDialog.vue";
 import WorkWeekSettingsDialog from "../dialogs/WorkWeekSettingsDialog.vue";
 import { toast } from 'vue-sonner';
+import realTimeService from '../../services/realTimeService.js';
+import { apiService } from '../../services/apiService.js';
+import authManager from '../../services/authService.js';
 
 const props = defineProps({
   currentView: String
@@ -30,24 +33,29 @@ const isReportOpen = ref(false);
 const isExportOpen = ref(false);
 const isAddUserOpen = ref(false);
 const isWorkWeekOpen = ref(false);
+const isLoading = ref(false);
+const searchQuery = ref('');
 
-const employees = [
-    { id: "EMP001", name: "John Smith", department: "Production", role: "employee", status: "active", hoursThisWeek: 42.5, type: "Regular" },
-    { id: "EMP002", name: "Sarah Johnson", department: "Field Service", role: "manager", status: "active", hoursThisWeek: 45.2, type: "Field Worker" },
-    { id: "EMP003", name: "Mike Chen", department: "Quality Control", role: "employee", status: "inactive", hoursThisWeek: 38.7, type: "Regular" },
-    { id: "EMP004", name: "Emma Davis", department: "Production", role: "employee", status: "active", hoursThisWeek: 41.0, type: "Regular" },
-    { id: "EMP005", name: "David Wilson", department: "Warehouse", role: "employee", status: "active", hoursThisWeek: 40.0, type: "Warehouse" },
-    { id: "EMP006", name: "Lisa Anderson", department: "HR", role: "hr", status: "active", hoursThisWeek: 40.0, type: "Regular" },
-];
+// API-driven data
+const employees = ref([]);
+const departmentStats = ref([]);
+const dashboardStats = ref({
+  totalEmployees: 0,
+  activeToday: 0,
+  totalHoursWeek: 0,
+  pendingActions: 0
+});
 
-const departmentStats = [
-    { department: "Production", employees: 45, activeToday: 42, avgHours: 42.3 },
-    { department: "Warehouse", employees: 28, activeToday: 26, avgHours: 41.8 },
-    { department: "Field Service", employees: 18, activeToday: 15, avgHours: 39.5 },
-    { department: "Quality Control", employees: 15, activeToday: 14, avgHours: 40.2 },
-    { department: "HR", employees: 5, activeToday: 5, avgHours: 40.0 },
-    { department: "Administration", employees: 8, activeToday: 8, avgHours: 39.8 },
-];
+// Filtered employees based on search
+const filteredEmployees = computed(() => {
+  if (!searchQuery.value) return employees.value;
+  const query = searchQuery.value.toLowerCase();
+  return employees.value.filter(emp => 
+    emp.name.toLowerCase().includes(query) ||
+    emp.department?.toLowerCase().includes(query) ||
+    emp.role?.toLowerCase().includes(query)
+  );
+});
 
 const handleViewEmployee = (employee) => {
   selectedEmployee.value = employee;
@@ -63,19 +71,155 @@ const handleEditEmployee = (employee) => {
   isAddEditOpen.value = true;
 };
 
-const handleSaveEmployee = (employeeData) => {
-  if (editingEmployee.value) {
-    toast.success("Employee updated successfully!");
-  } else {
-    toast.success("Employee added successfully!");
+// Load dashboard data from API
+const loadDashboard = async () => {
+  isLoading.value = true;
+  console.log('👑 Admin Dashboard: Loading data from API...');
+  
+  try {
+    // Load all users/employees
+    console.log('👑 Fetching users...');
+    const usersRes = await apiService.getUsers();
+    console.log('👑 Users response:', usersRes);
+    
+    if (usersRes && Array.isArray(usersRes)) {
+      employees.value = usersRes.map(user => ({
+        id: user.id,
+        emp_id: `EMP${String(user.id).padStart(3, '0')}`,
+        name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username || user.email,
+        department: user.department || 'General',
+        role: user.role || (user.role_id === 1 ? 'admin' : user.role_id === 2 ? 'manager' : user.role_id === 3 ? 'hr' : 'employee'),
+        status: user.is_active !== false ? 'active' : 'inactive',
+        hoursThisWeek: user.hours_this_week || 0,
+        type: user.employee_type || 'Regular',
+        email: user.email
+      }));
+    }
+    
+    // Calculate department stats from employees
+    const deptMap = new Map();
+    employees.value.forEach(emp => {
+      const dept = emp.department || 'General';
+      if (!deptMap.has(dept)) {
+        deptMap.set(dept, { department: dept, employees: 0, activeToday: 0, totalHours: 0 });
+      }
+      const stats = deptMap.get(dept);
+      stats.employees++;
+      if (emp.status === 'active') stats.activeToday++;
+      stats.totalHours += emp.hoursThisWeek || 0;
+    });
+    
+    departmentStats.value = Array.from(deptMap.values()).map(dept => ({
+      ...dept,
+      avgHours: dept.employees > 0 ? (dept.totalHours / dept.employees).toFixed(1) : 0
+    }));
+    
+    // Get analytics
+    try {
+      const analyticsRes = await apiService.getAnalyticsOverview();
+      const totalHours = employees.value.reduce((sum, emp) => sum + (emp.hoursThisWeek || 0), 0);
+      
+      dashboardStats.value = {
+        totalEmployees: employees.value.length,
+        activeToday: employees.value.filter(e => e.status === 'active').length,
+        totalHoursWeek: Math.round(totalHours),
+        pendingActions: analyticsRes?.pending_approvals || 0
+      };
+    } catch (e) {
+      console.log('Analytics not available:', e);
+      const totalHours = employees.value.reduce((sum, emp) => sum + (emp.hoursThisWeek || 0), 0);
+      dashboardStats.value = {
+        totalEmployees: employees.value.length,
+        activeToday: employees.value.filter(e => e.status === 'active').length,
+        totalHoursWeek: Math.round(totalHours),
+        pendingActions: 0
+      };
+    }
+    
+  } catch (error) {
+    console.error('Error loading admin dashboard:', error);
+    toast.error('Failed to load dashboard data');
+  } finally {
+    isLoading.value = false;
   }
-  isAddEditOpen.value = false;
 };
 
-const handleSaveUser = (userData) => {
-  toast.success("User created successfully!");
-  isAddUserOpen.value = false;
+// Setup realtime updates
+onMounted(() => {
+  console.log('📡 Admin Dashboard: Setting up realtime listeners');
+  
+  // Load initial data
+  loadDashboard();
+  
+  // Listen for system-wide updates
+  const handleSystemAlert = (data) => {
+    console.log('📡 Realtime: System alert', data);
+    toast.warning(data.message, { duration: 5000 });
+  };
+  
+  const handleEmployeeStatusChange = (data) => {
+    console.log('📡 Realtime: Employee status changed', data);
+    loadDashboard(); // Reload data
+  };
+  
+  const handleDepartmentStatsUpdated = (data) => {
+    console.log('📡 Realtime: Department stats updated', data);
+    loadDashboard(); // Reload data
+  };
+  
+  const handleNotifications = (notifications) => {
+    console.log('📡 Realtime: Admin notifications', notifications);
+    notifications.forEach(notif => {
+      if (!notif.read) {
+        toast.info(notif.message);
+      }
+    });
+  };
+  
+  // Register listeners
+  realTimeService.on('system-alert', handleSystemAlert);
+  realTimeService.on('employee-status-changed', handleEmployeeStatusChange);
+  realTimeService.on('department-stats-updated', handleDepartmentStatsUpdated);
+  realTimeService.on('notifications-updated', handleNotifications);
+  
+  onUnmounted(() => {
+    // Cleanup listeners
+    realTimeService.off('system-alert', handleSystemAlert);
+    realTimeService.off('employee-status-changed', handleEmployeeStatusChange);
+    realTimeService.off('department-stats-updated', handleDepartmentStatsUpdated);
+    realTimeService.off('notifications-updated', handleNotifications);
+  });
+});
+
+const handleSaveEmployee = async (employeeData) => {
+  try {
+    if (editingEmployee.value) {
+      await apiService.updateUser(editingEmployee.value.id, employeeData);
+      toast.success("Employee updated successfully!");
+    } else {
+      await apiService.createUser(employeeData);
+      toast.success("Employee added successfully!");
+    }
+    isAddEditOpen.value = false;
+    loadDashboard(); // Reload data
+  } catch (error) {
+    console.error('Error saving employee:', error);
+    toast.error("Failed to save employee");
+  }
 };
+
+const handleUserAdded = async (userData) => {
+  try {
+    await apiService.createUser(userData);
+    toast.success("User added successfully!");
+    isAddUserOpen.value = false;
+    loadDashboard(); // Reload data
+  } catch (error) {
+    console.error('Error adding user:', error);
+    toast.error("Failed to add user");
+  }
+};
+
 </script>
 
 <template>
@@ -96,7 +240,7 @@ const handleSaveUser = (userData) => {
       <div class="flex gap-4">
         <div class="relative flex-1">
           <Search class="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-          <Input placeholder="Search employees..." class="pl-10" />
+          <Input v-model="searchQuery" placeholder="Search employees..." class="pl-10" />
         </div>
         <Button variant="outline" class="gap-2">
           <Filter class="h-4 w-4" />
@@ -118,7 +262,7 @@ const handleSaveUser = (userData) => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableRow v-for="employee in employees" :key="employee.id">
+              <TableRow v-for="employee in filteredEmployees" :key="employee.id">
                 <TableCell>
                   <div>
                     <p class="font-medium">{{ employee.name }}</p>
@@ -154,7 +298,7 @@ const handleSaveUser = (userData) => {
       </Card>
     </div>
     <EmployeeDetailsDialog :employee="selectedEmployee" :open="isDetailsOpen" @update:open="isDetailsOpen = $event" />
-    <AddUserDialog :open="isAddUserOpen" @update:open="isAddUserOpen = $event" @save="handleSaveUser" />
+    <AddUserDialog :open="isAddUserOpen" @update:open="isAddUserOpen = $event" @save="handleUserAdded" />
   </div>
 
   <div v-else-if="currentView === 'analytics'">
@@ -205,12 +349,15 @@ const handleSaveUser = (userData) => {
           </Table>
         </CardContent>
       </Card>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div v-if="isLoading" class="text-center py-8">
+        <p class="text-muted-foreground">Loading analytics...</p>
+      </div>
+      <div v-else class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card>
           <CardContent class="pt-6">
             <div class="space-y-2">
               <p class="text-sm text-muted-foreground">Total Employees</p>
-              <p class="text-3xl">119</p>
+              <p class="text-3xl">{{ dashboardStats.totalEmployees }}</p>
               <p class="text-sm text-muted-foreground">Across all departments</p>
             </div>
           </CardContent>
@@ -219,16 +366,16 @@ const handleSaveUser = (userData) => {
           <CardContent class="pt-6">
             <div class="space-y-2">
               <p class="text-sm text-muted-foreground">Active Today</p>
-              <p class="text-3xl">110</p>
-              <p class="text-sm text-muted-foreground">92% attendance rate</p>
+              <p class="text-3xl">{{ dashboardStats.activeToday }}</p>
+              <p class="text-sm text-muted-foreground">{{ dashboardStats.totalEmployees > 0 ? Math.round((dashboardStats.activeToday / dashboardStats.totalEmployees) * 100) : 0 }}% attendance rate</p>
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent class="pt-6">
             <div class="space-y-2">
-              <p class="text-sm text-muted-foreground">Avg Hours/Week</p>
-              <p class="text-3xl">41.2</p>
+              <p class="text-sm text-muted-foreground">Total Hours This Week</p>
+              <p class="text-3xl">{{ dashboardStats.totalHoursWeek }}</p>
               <p class="text-sm text-muted-foreground">Across all departments</p>
             </div>
           </CardContent>
@@ -388,7 +535,7 @@ const handleSaveUser = (userData) => {
     <AddEditEmployeeDialog :employee="editingEmployee" :open="isAddEditOpen" @update:open="isAddEditOpen = $event" @save="handleSaveEmployee" />
     <GenerateReportDialog :open="isReportOpen" @update:open="isReportOpen = $event" reportType="hr" />
     <ExportDataDialog :open="isExportOpen" @update:open="isExportOpen = $event" dataType="admin" />
-    <AddUserDialog :open="isAddUserOpen" @update:open="isAddUserOpen = $event" @save="handleSaveUser" />
+    <AddUserDialog :open="isAddUserOpen" @update:open="isAddUserOpen = $event" @save="handleUserAdded" />
     <WorkWeekSettingsDialog :open="isWorkWeekOpen" @update:open="isWorkWeekOpen = $event" @save="(settings) => { console.log('Work week settings saved:', settings); toast.success('Work week settings updated successfully!'); }" />
   </div>
 </template>

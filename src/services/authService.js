@@ -10,8 +10,8 @@ class AuthTokenManager {
   mapRoleIdToName(roleId) {
     const roleMap = {
       1: 'admin',      // Admin
-      2: 'hr',         // HR
-      3: 'manager',    // Manager
+      2: 'manager',    // Manager
+      3: 'hr',         // HR
       4: 'employee'    // Employee
     };
     return roleMap[roleId] || 'employee';
@@ -29,24 +29,46 @@ class AuthTokenManager {
       // Extract user data from response
       if (result && result.data) {
         const data = result.data;
-        const attributes = data.attributes || data;
+        // Handle both data.user and data directly
+        const attributes = data.user || data;
+        
+        console.log('🔍 AuthService login - RAW API response:', result);
+        console.log('🔍 data:', data);
+        console.log('🔍 attributes:', attributes);
         
         // Get role - handle both role_id (number) and role (string)
         let roleName = 'employee';
+        
+        // Priority 1: Use role_id if available
         if (attributes.role_id) {
           roleName = this.mapRoleIdToName(attributes.role_id);
-        } else if (attributes.role) {
+          console.log('✅ Using role_id:', attributes.role_id, '→', roleName);
+        } 
+        // Priority 2: Use role string if available
+        else if (attributes.role) {
           roleName = attributes.role.toLowerCase();
+          console.log('✅ Using role string:', attributes.role, '→', roleName);
         }
         
+        // If API returned "Admin", "Manager", "HR", "Employee" - normalize them
+        if (roleName === 'admin' || roleName === 'administrator') roleName = 'admin';
+        if (roleName === 'manager') roleName = 'manager';
+        if (roleName === 'hr' || roleName === 'human resources') roleName = 'hr';
+        if (roleName === 'employee' || roleName === 'user') roleName = 'employee';
+        
         const user = {
-          id: data.id || attributes.id || null,
+          id: attributes.id || data.id || null,
           email: attributes.email || null,
           role: roleName,
           role_id: attributes.role_id || null,
-          first_name: attributes.first_name || '',
-          last_name: attributes.last_name || ''
+          first_name: attributes.first_name || attributes.firstName || '',
+          last_name: attributes.last_name || attributes.lastName || '',
+          username: attributes.username || '',
+          name: `${attributes.first_name || attributes.firstName || ''} ${attributes.last_name || attributes.lastName || ''}`.trim() || attributes.username || attributes.email || 'User'
         };
+
+        console.log('✅ FINAL role:', roleName);
+        console.log('✅ FINAL user object:', user);
 
         // Token is already set by apiService.login()
         const token = apiService.jwtToken;

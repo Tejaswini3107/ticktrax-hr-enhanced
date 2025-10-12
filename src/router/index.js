@@ -66,7 +66,25 @@ const routes = [
       {
         path: '',
         name: 'DashboardHome',
-        component: EmployeeDashboard, // Default dashboard
+        redirect: to => {
+          // Auto-redirect to role-specific dashboard
+          const userData = localStorage.getItem('user_data');
+          if (userData) {
+            try {
+              const user = JSON.parse(userData);
+              const role = user.role || 'employee';
+              
+              // Route based on role
+              if (role === 'admin') return '/dashboard/admin';
+              if (role === 'manager') return '/dashboard/manager';
+              if (role === 'hr') return '/dashboard/admin'; // HR uses admin dashboard
+              return '/dashboard/employee';
+            } catch (e) {
+              return '/dashboard/employee';
+            }
+          }
+          return '/dashboard/employee';
+        },
         meta: { requiresAuth: true }
       },
       {
@@ -205,9 +223,34 @@ router.beforeEach(async (to, from, next) => {
       try {
         const isAuthenticated = await authManager.isAuthenticated()
         if (isAuthenticated) {
-          // Already logged in, redirect to dashboard
-          next('/dashboard')
-          return
+          // Get user role and redirect to appropriate dashboard
+          const userData = localStorage.getItem('user_data');
+          if (userData) {
+            try {
+              const user = JSON.parse(userData);
+              const role = user.role || 'employee';
+              
+              if (role === 'admin') {
+                next('/dashboard/admin');
+                return;
+              }
+              if (role === 'manager') {
+                next('/dashboard/manager');
+                return;
+              }
+              if (role === 'hr') {
+                next('/dashboard/admin'); // HR uses admin dashboard
+                return;
+              }
+              next('/dashboard/employee');
+              return;
+            } catch (e) {
+              next('/dashboard');
+              return;
+            }
+          }
+          next('/dashboard');
+          return;
         }
       } catch (error) {
         // Continue to login if auth check fails

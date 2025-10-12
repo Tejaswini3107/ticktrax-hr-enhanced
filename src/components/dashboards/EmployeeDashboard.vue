@@ -17,6 +17,7 @@ import { toast } from 'vue-sonner';
 
 import { apiService } from '../../services/apiService.js';
 import authManager from '../../services/authService.js';
+import realTimeService from '../../services/realTimeService.js';
 import { onUnmounted } from 'vue';
 
 // Role types removed - using JavaScript
@@ -114,11 +115,45 @@ const loadDashboard = async () => {
 
 onMounted(() => {
   loadDashboard();
+  
   // Listen for clock changes from ClockWidget and refresh
   const onClockChanged = () => { loadDashboard(); };
   window.addEventListener('clock-changed', onClockChanged);
+  
+  // Setup realtime listeners
+  const handleClockStatusChanged = (status) => {
+    console.log('📡 Realtime: Clock status changed', status);
+    loadDashboard(); // Refresh dashboard data
+  };
+  
+  const handleClockUpdate = (data) => {
+    // Live clock updates (every second)
+    // This could update a live clock display if needed
+  };
+  
+  const handleNotificationsUpdated = (notifications) => {
+    console.log('📡 Realtime: Notifications updated', notifications);
+    // Show notification toasts
+    notifications.forEach(notif => {
+      if (!notif.read) {
+        toast.info(notif.message);
+      }
+    });
+  };
+  
+  // Register realtime event listeners
+  realTimeService.on('clock-status-changed', handleClockStatusChanged);
+  realTimeService.on('clock-update', handleClockUpdate);
+  realTimeService.on('notifications-updated', handleNotificationsUpdated);
+  
   onUnmounted(() => {
-    try { window.removeEventListener('clock-changed', onClockChanged); } catch (e) {}
+    try { 
+      window.removeEventListener('clock-changed', onClockChanged);
+      // Cleanup realtime listeners
+      realTimeService.off('clock-status-changed', handleClockStatusChanged);
+      realTimeService.off('clock-update', handleClockUpdate);
+      realTimeService.off('notifications-updated', handleNotificationsUpdated);
+    } catch (e) {}
   });
 });
 

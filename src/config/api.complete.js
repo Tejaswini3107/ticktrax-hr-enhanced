@@ -3,8 +3,7 @@
 
 export const API_CONFIG = {
   // Base URL Configuration
-  BASE_URL: import.meta.env.VITE_API_BASE_URL || 
-            (import.meta.env.DEV ? '/api' : 'http://localhost:4000/api'),
+  BASE_URL: import.meta.env.VITE_API_BASE_URL || 'https://batman-api-a20b3a37aa3c.herokuapp.com/api',
   
   TIMEOUT: 10000,
   RETRY_ATTEMPTS: 3,

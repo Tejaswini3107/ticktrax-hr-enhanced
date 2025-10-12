@@ -8,6 +8,7 @@ import Badge from './ui/badge.vue';
 import LocationTracker from './special/LocationTracker.vue';
 import { apiService } from '../services/apiService.js';
 import authManager from '../services/authService.js';
+import realTimeService from '../services/realTimeService.js';
 
 const props = defineProps({
   showLocation: {
@@ -62,6 +63,28 @@ onMounted(async () => {
   } catch (e) {
     console.debug('Could not fetch server clock state', e?.message || e);
   }
+  
+  // Setup realtime listeners for live clock updates
+  const handleClockStatusChanged = (clockStatus) => {
+    console.log('📡 ClockWidget: Status changed', clockStatus);
+    if (clockStatus.is_clocked_in) {
+      status.value = 'clocked-in';
+      if (clockStatus.clock_in_time) {
+        clockedInTime.value = new Date(clockStatus.clock_in_time);
+      }
+    } else {
+      status.value = 'clocked-out';
+      clockedInTime.value = null;
+      elapsedTime.value = 0;
+    }
+  };
+  
+  // Register realtime listener
+  realTimeService.on('clock-status-changed', handleClockStatusChanged);
+  
+  onUnmounted(() => {
+    realTimeService.off('clock-status-changed', handleClockStatusChanged);
+  });
 });
 
 // Backend-backed clock in/out

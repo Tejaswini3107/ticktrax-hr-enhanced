@@ -28,7 +28,10 @@ const handleLogin = async () => {
   try {
     const result = await authManager.login(email, pwd);
     if (result.success) {
-      emit('login', `${result.user.first_name} ${result.user.last_name}`, result.user.role);
+      // Use the name field from authService
+      const userName = result.user.name || result.user.username || result.user.email || 'User';
+      
+      emit('login', userName, result.user.role);
     } else {
       error.value = result.error || "Invalid email/username or password";
     }

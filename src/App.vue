@@ -12,12 +12,14 @@ import Toaster from './components/ui/sonner.vue';
 import { toast } from 'vue-sonner';
 import authManager from './services/authService.js';
 import mobileService from './services/mobileService.js';
+import realTimeService from './services/realTimeService.js';
 import './utils/apiTest.js'; // Auto-test API connection
 
 const user = ref(null);
 const currentView = ref("dashboard");
 const isProfileOpen = ref(false);
 const isMobileApp = ref(false);
+const notificationCount = ref(0);
 
 // Detect if we should use mobile layout
 onMounted(() => {
@@ -26,6 +28,31 @@ onMounted(() => {
   // Listen for orientation changes
   window.addEventListener('orientationchange', detectMobileEnvironment);
   window.addEventListener('resize', detectMobileEnvironment);
+  
+  // Setup realtime notification listeners
+  const handleNotificationsUpdated = (notifications) => {
+    console.log('📡 App: Notifications updated', notifications);
+    const unreadCount = notifications.filter(n => !n.read).length;
+    notificationCount.value = unreadCount;
+  };
+  
+  const handleNotification = (notification) => {
+    console.log('📡 App: New notification', notification);
+    notificationCount.value += 1;
+    // Show toast for new notification
+    toast.info(notification.message || 'New notification');
+  };
+  
+  // Register listeners
+  realTimeService.on('notifications-updated', handleNotificationsUpdated);
+  realTimeService.on('notification', handleNotification);
+  
+  onUnmounted(() => {
+    window.removeEventListener('orientationchange', detectMobileEnvironment);
+    window.removeEventListener('resize', detectMobileEnvironment);
+    realTimeService.off('notifications-updated', handleNotificationsUpdated);
+    realTimeService.off('notification', handleNotification);
+  });
 });
 
 const detectMobileEnvironment = () => {
@@ -38,8 +65,18 @@ const detectMobileEnvironment = () => {
 };
 
 const handleLogin = (name, role) => {
+  console.log('🎯 App.vue handleLogin START');
+  console.log('🎯 Received name:', name);
+  console.log('🎯 Received role:', role, 'type:', typeof role);
+  
   user.value = { name, role };
+  
+  console.log('🎯 user.value SET TO:', JSON.stringify(user.value));
+  console.log('🎯 user.value.role:', user.value.role);
+  
   setDashboard();
+  
+  console.log('🎯 After setDashboard, currentView:', currentView.value);
 };
 
 const handleLogout = async () => {
@@ -67,17 +104,51 @@ const handleProfileClick = () => {
 };
 
 const dashboardContent = computed(() => {
-  if (!user.value) return null;
-  switch (user.value.role) {
-    case "employee":
-      return EmployeeDashboard;
-    case "manager":
-      return ManagerDashboard;
-    case "admin":
-      return AdminDashboard;
-    default:
-      return EmployeeDashboard;
+  console.log('🔄 dashboardContent computed() TRIGGERED');
+  
+  if (!user.value) {
+    console.log('❌ No user, returning null');
+    return null;
   }
+  
+  console.log('✅ user.value EXISTS:', JSON.stringify(user.value));
+  
+  // Normalize role to lowercase
+  const role = (user.value.role || 'employee').toString().toLowerCase().trim();
+  
+  console.log('🎭 ROLE after normalization:', role);
+  console.log('🎭 Role === "admin"?', role === 'admin');
+  console.log('🎭 Role === "manager"?', role === 'manager');
+  console.log('🎭 Role === "hr"?', role === 'hr');
+  console.log('🎭 Role === "employee"?', role === 'employee');
+  
+  let component;
+  let componentName;
+  
+  switch (role) {
+    case "admin":
+      component = AdminDashboard;
+      componentName = 'AdminDashboard';
+      break;
+    case "manager":
+      component = ManagerDashboard;
+      componentName = 'ManagerDashboard';
+      break;
+    case "hr":
+      component = AdminDashboard; // HR uses admin dashboard
+      componentName = 'AdminDashboard (HR)';
+      break;
+    case "employee":
+      component = EmployeeDashboard;
+      componentName = 'EmployeeDashboard';
+      break;
+    default:
+      component = EmployeeDashboard;
+      componentName = 'EmployeeDashboard (default)';
+  }
+  
+  console.log('🎯 SELECTED COMPONENT:', componentName);
+  return component;
 });
 
 // Helper to set dashboard with trace for debugging unexpected resets
@@ -96,23 +167,46 @@ const setDashboard = () => {
 
 // Check for existing authentication on app startup
 onMounted(async () => {
-  // Only attempt backend authentication if we have a stored token
-  const storedToken = localStorage.getItem('csrf_token');
+  // Check for stored user data first
+  const storedUser = localStorage.getItem('user_data');
+  if (storedUser) {
+    try {
+      const userData = JSON.parse(storedUser);
+      console.log('App.vue onMounted - found stored user:', userData);
+      
+      user.value = {
+        name: userData.name || `${userData.first_name} ${userData.last_name}`.trim(),
+        role: userData.role
+      };
+      
+      console.log('App.vue onMounted - set user.value:', user.value);
+      setDashboard();
+      toast.success('Welcome back!');
+      return;
+    } catch (error) {
+      console.log('Failed to parse stored user data:', error);
+      localStorage.removeItem('user_data');
+    }
+  }
+  
+  // Only attempt backend authentication if we have a stored token but no user data
+  const storedToken = localStorage.getItem('jwt_token');
   if (storedToken) {
     try {
-      const userProfile = await authManager.getUserProfile();
-      if (userProfile) {
-          user.value = {
-            name: `${userProfile.first_name} ${userProfile.last_name}`,
-            role: userProfile.role
-          };
-          setDashboard();
-          toast.success('Welcome back!');
-        }
+      const userProfile = await authManager.getCurrentUser();
+      if (userProfile && userProfile.success) {
+        const userData = userProfile.data;
+        user.value = {
+          name: userData.name || `${userData.first_name} ${userData.last_name}`.trim(),
+          role: userData.role
+        };
+        setDashboard();
+        toast.success('Welcome back!');
+      }
     } catch (error) {
-      console.log('Backend not available, using demo mode');
-      // Clear invalid tokens and continue in demo mode
-      authManager.csrfToken = null;
+      console.log('Backend authentication failed:', error);
+      // Clear invalid tokens
+      localStorage.removeItem('jwt_token');
       localStorage.removeItem('csrf_token');
     }
   }
@@ -141,7 +235,7 @@ onMounted(async () => {
           :currentRole="user.role"
           @update:currentRole="handleRoleChange"
           :userName="user.name"
-          :notifications="3"
+          :notifications="notificationCount"
           :currentView="currentView"
           @update:currentView="currentView = $event"
           @logout="handleLogout"
