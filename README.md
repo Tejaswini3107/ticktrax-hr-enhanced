@@ -77,19 +77,27 @@ The app is configured to work with a backend API:
 ## 🏗️ Project Structure
 
 ```
-src/
-├── components/
-│   ├── auth/           # Authentication components
-│   ├── dashboards/     # Role-specific dashboards
-│   ├── dialogs/        # Modal dialogs
-│   ├── reports/        # Reporting components
-│   ├── special/        # Specialized components
-│   └── ui/             # Reusable UI components
-├── services/
-│   └── authService.js  # Authentication service
-├── styles/
-│   └── globals.css     # Global styles
-└── main.js             # Application entry point
+ticktrax/
+├── api-testing/        # Postman collections & API testing resources
+│   ├── Gotham Time Manager API.postman_collection.json
+│   ├── Gotham_Time_Manager.postman_environment.json
+│   └── README.md
+├── src/
+│   ├── components/
+│   │   ├── auth/       # Authentication components
+│   │   ├── dashboards/ # Role-specific dashboards
+│   │   ├── dialogs/    # Modal dialogs
+│   │   ├── reports/    # Reporting components
+│   │   ├── special/    # Specialized components
+│   │   └── ui/         # Reusable UI components
+│   ├── services/
+│   │   └── authService.js  # Authentication service
+│   ├── styles/
+│   │   └── globals.css     # Global styles
+│   └── main.js         # Application entry point
+├── public/             # Static assets
+├── build/              # Production build
+└── mobile/             # Mobile app (Cordova)
 ```
 
 ## 🎨 UI Components
@@ -168,6 +176,23 @@ The application is designed to work with a REST API:
 - `GET /api/reports/team` - Team reports
 - `GET /api/reports/admin` - Admin reports
 
+### 🧪 API Testing with Postman
+
+We provide comprehensive Postman collections for testing all API endpoints:
+
+- **87 API endpoints** covering all features
+- **Pre-configured environment** with sample variables
+- **Auto-authentication** with JWT token management
+- **Sample requests** for all user roles
+
+**Quick Start:**
+1. Import `api-testing/Gotham Time Manager API.postman_collection.json` into Postman
+2. Import `api-testing/Gotham_Time_Manager.postman_environment.json`
+3. Select the environment from the dropdown
+4. Start testing!
+
+📚 **Full documentation:** See [`api-testing/README.md`](./api-testing/README.md) for detailed setup and usage instructions.
+
 ## 🧪 Testing
 
 ### Demo Mode
@@ -194,15 +219,29 @@ When connected to a backend API:
 
 This project is licensed under the MIT License.
 
+## 📚 Additional Documentation
+
+The project includes comprehensive documentation:
+
+- **[API Testing Guide](./api-testing/README.md)** - Postman collections and testing workflows
+- **[Backend API Guide](./BACKEND_API_GUIDE.md)** - Backend implementation details
+- **[Clean API Guide](./CLEAN_API_GUIDE.md)** - API architecture patterns
+- **[CORS Setup Guide](./CORS_SETUP_GUIDE.md)** - Cross-origin configuration
+- **[Real-time Features](./REALTIME_FEATURES_GUIDE.md)** - WebSocket and live updates
+- **[Mobile App Guide](./MOBILE_README.md)** - Cordova mobile app setup
+- **[Demo Guide](./src/DEMO_GUIDE.md)** - Testing without backend
+
 ## 🆘 Support
 
 For support and questions:
-- Check the documentation
-- Review the demo guide
+- Check the documentation guides above
+- Review the API testing collection
 - Open an issue on GitHub
 
 ## 🔄 Recent Updates
 
+- ✅ Added comprehensive Postman API collection (87 endpoints)
+- ✅ Integrated API testing documentation and resources
 - ✅ Fixed authentication token management
 - ✅ Added secure JWT + CSRF token handling
 - ✅ Improved error handling and user feedback

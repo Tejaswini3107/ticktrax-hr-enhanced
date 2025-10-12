@@ -9,36 +9,38 @@ class AuthTokenManager {
   // Login and store tokens
   async login(emailOrUsername, password) {
     try {
-      // Use email-only sign in
+      // Use the comprehensive API service's login method
       const credentials = { email: emailOrUsername, password };
 
-      // Always use real API
-      const result = await apiService.signIn(credentials);
+      // Call the new login API
+      const result = await apiService.login(credentials);
 
-      // Treat presence of data/meta as success for real API
-      if (result && result.data && result.meta) {
-        const attributes = result.data.attributes || {};
+      // Extract user data from response
+      if (result && result.data) {
+        const data = result.data;
+        const attributes = data.attributes || data;
+        
         const user = {
-          id: result.data.id || attributes.id || null,
+          id: data.id || attributes.id || null,
           email: attributes.email || null,
           role: (attributes.role || 'employee').toLowerCase(),
           first_name: attributes.first_name || '',
           last_name: attributes.last_name || ''
         };
 
-        const token = result?.meta?.token || null;
-        const csrf = result?.meta?.csrf_token || null;
+        // Token is already set by apiService.login()
+        const token = apiService.jwtToken;
+        const csrf = apiService.csrfToken;
         this.csrfToken = csrf;
 
         if (user) {
           localStorage.setItem('user_data', JSON.stringify(user));
         }
 
-        apiService.setTokens(token || null, csrf || null);
         return { success: true, user, token };
       }
 
-      // Fallback: if API returned a structured error
+      // Handle error responses
       return { success: false, error: result?.error || result?.message || 'Login failed' };
     } catch (error) {
       return { success: false, error: error.message };
@@ -53,11 +55,11 @@ class AuthTokenManager {
   // Logout
   async logout() {
     try {
-      const result = await apiService.signOut();
+      await apiService.logout();
       this.csrfToken = null;
       // Clear stored user data
       localStorage.removeItem('user_data');
-      return result.success;
+      return true;
     } catch (error) {
       console.error('Logout failed:', error);
       this.csrfToken = null;
