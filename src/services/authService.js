@@ -6,6 +6,17 @@ class AuthTokenManager {
     this.csrfToken = null;
   }
 
+  // Map role_id to role name
+  mapRoleIdToName(roleId) {
+    const roleMap = {
+      1: 'admin',      // Admin
+      2: 'hr',         // HR
+      3: 'manager',    // Manager
+      4: 'employee'    // Employee
+    };
+    return roleMap[roleId] || 'employee';
+  }
+
   // Login and store tokens
   async login(emailOrUsername, password) {
     try {
@@ -20,10 +31,19 @@ class AuthTokenManager {
         const data = result.data;
         const attributes = data.attributes || data;
         
+        // Get role - handle both role_id (number) and role (string)
+        let roleName = 'employee';
+        if (attributes.role_id) {
+          roleName = this.mapRoleIdToName(attributes.role_id);
+        } else if (attributes.role) {
+          roleName = attributes.role.toLowerCase();
+        }
+        
         const user = {
           id: data.id || attributes.id || null,
           email: attributes.email || null,
-          role: (attributes.role || 'employee').toLowerCase(),
+          role: roleName,
+          role_id: attributes.role_id || null,
           first_name: attributes.first_name || '',
           last_name: attributes.last_name || ''
         };
@@ -97,7 +117,22 @@ class AuthTokenManager {
         const res = await apiService.getCurrentUser();
         // If API returns an object with success/data, forward it
         if (res && (res.success || res.data)) {
-          const data = res.data || res;
+          let data = res.data || res;
+          const attributes = data.attributes || data;
+          
+          // Map role_id to role name if needed
+          if (attributes.role_id && !attributes.role) {
+            data = {
+              ...data,
+              role: this.mapRoleIdToName(attributes.role_id)
+            };
+          } else if (attributes.role && typeof attributes.role === 'string') {
+            data = {
+              ...data,
+              role: attributes.role.toLowerCase()
+            };
+          }
+          
           try { localStorage.setItem('user_data', JSON.stringify(data)); } catch (e) {}
           return { success: true, data };
         }

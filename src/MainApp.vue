@@ -63,6 +63,8 @@ export default {
           return 'EmployeeDashboard';
         case 'manager':
           return 'ManagerDashboard';
+        case 'hr':
+          return 'AdminDashboard'; // HR uses admin dashboard
         case 'admin':
           return 'AdminDashboard';
         default:

@@ -75,7 +75,7 @@ const routes = [
         component: EmployeeDashboard,
         meta: { 
           requiresAuth: true,
-          requiresRole: ['employee', 'manager', 'admin']
+          requiresRole: ['employee', 'manager', 'admin', 'hr']
         }
       },
       {
@@ -84,7 +84,7 @@ const routes = [
         component: ManagerDashboard,
         meta: { 
           requiresAuth: true,
-          requiresRole: ['manager', 'admin']
+          requiresRole: ['manager', 'admin', 'hr']
         }
       },
       {
@@ -93,7 +93,7 @@ const routes = [
         component: AdminDashboard,
         meta: { 
           requiresAuth: true,
-          requiresRole: ['admin']
+          requiresRole: ['admin', 'hr']
         }
       }
     ]
