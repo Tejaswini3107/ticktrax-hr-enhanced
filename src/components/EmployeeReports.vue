@@ -315,7 +315,7 @@ const periodLabel = computed(() => {
           View your time tracking reports and analytics
         </p>
       </div>
-      <div class="flex items-center gap-2">
+      <!-- <div class="flex items-center gap-2">
         <Select v-model="selectedPeriod">
           <SelectTrigger class="w-40">
             <Calendar class="h-4 w-4 mr-2" />
@@ -337,7 +337,7 @@ const periodLabel = computed(() => {
           <Download class="h-4 w-4" />
           Export PDF
         </Button>
-      </div>
+      </div> -->
     </div>
 
     <Card v-if="selectedPeriod === 'custom'">
@@ -366,10 +366,10 @@ const periodLabel = computed(() => {
             <div>
               <p class="text-sm text-muted-foreground">Total Hours</p>
               <p class="text-2xl mt-1">{{ summaryStats.totalHours }}h</p>
-              <p class="text-xs text-muted-foreground mt-1">
+              <!-- <p class="text-xs text-muted-foreground mt-1">
                 Regular: {{ summaryStats.regularHours }}h | OT:
                 {{ summaryStats.overtimeHours }}h
-              </p>
+              </p> -->
             </div>
             <Clock class="h-8 w-8 text-primary" />
           </div>
@@ -381,9 +381,9 @@ const periodLabel = computed(() => {
             <div>
               <p class="text-sm text-muted-foreground">Daily Average</p>
               <p class="text-2xl mt-1">{{ summaryStats.averageDaily }}h</p>
-              <p class="text-xs text-green-600 mt-1">
+              <!-- <p class="text-xs text-green-600 mt-1">
                 +0.2h from last period
-              </p>
+              </p> -->
             </div>
             <TrendingUp class="h-8 w-8 text-green-500" />
           </div>

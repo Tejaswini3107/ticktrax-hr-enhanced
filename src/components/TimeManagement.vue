@@ -230,11 +230,18 @@ const stats = computed(() => ({
   manualEntries: timeEntries.value.filter((e) => e.isManual).length,
   thisWeekHours: (function(){
     const now = new Date();
+    // Calculate start of week as Monday (local time)
+    // JS getDay(): 0 (Sun) .. 6 (Sat). We want Monday as 1.
     const startOfWeek = new Date(now);
-    startOfWeek.setDate(now.getDate() - now.getDay());
+    const day = now.getDay();
+    // If today is Sunday (0), go back 6 days to Monday; otherwise shift to Monday
+    const diffToMonday = day === 0 ? -6 : (1 - day);
+    startOfWeek.setDate(now.getDate() + diffToMonday);
+    startOfWeek.setHours(0,0,0,0);
+    const startOfNextWeek = new Date(startOfWeek.getTime() + 7 * 24 * 60 * 60 * 1000);
     return timeEntries.value.reduce((acc,e) => {
       const d = e._ts ? new Date(e._ts) : new Date(e.date);
-      if (!isNaN(d.getTime()) && d >= startOfWeek) return acc + Number(e.hours || 0);
+      if (!isNaN(d.getTime()) && d >= startOfWeek && d < startOfNextWeek) return acc + Number(e.hours || 0);
       return acc;
     }, 0).toFixed(2);
   })(),

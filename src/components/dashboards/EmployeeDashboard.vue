@@ -87,8 +87,14 @@ const normalizeEntry = (raw) => {
 
 const computeStats = (entries) => {
   const now = new Date();
+  // Week is Monday -> Sunday. Compute startOfWeek as the most recent Monday at 00:00.
+  const day = now.getDay(); // 0 = Sun, 1 = Mon, ... 6 = Sat
+  const daysSinceMonday = (day + 6) % 7; // 0 when Monday, 1 when Tuesday, ..., 6 when Sunday
   const startOfWeek = new Date(now);
-  startOfWeek.setDate(now.getDate() - now.getDay());
+  startOfWeek.setHours(0,0,0,0);
+  startOfWeek.setDate(now.getDate() - daysSinceMonday);
+  const startOfNextWeek = new Date(startOfWeek);
+  startOfNextWeek.setDate(startOfWeek.getDate() + 7);
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
   let weekHours = 0;
@@ -100,7 +106,7 @@ const computeStats = (entries) => {
     const d = ts ? new Date(ts) : new Date(e.date);
     const h = Number(e.hours) || 0;
     if (!isNaN(d.getTime())) {
-      if (d >= startOfWeek) weekHours += h;
+      if (d >= startOfWeek && d < startOfNextWeek) weekHours += h;
       if (d >= startOfMonth) monthHours += h;
     }
     if (e.status !== 'approved') pending += 1;

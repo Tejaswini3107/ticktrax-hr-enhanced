@@ -53,8 +53,18 @@ const loadAdminData = async () => {
     const activities = [];
 
     // Limit per-user working-time fetches for performance
+    // Deduplicate by user id in case the users list contains duplicates
+    const seenUserIds = new Set();
     for (const u of userArray.slice(0, 100)) {
       const uid = u.id || u.attributes?.id || u.user_id;
+      // If no canonical id, skip (we can't query working times without an id)
+      if (!uid) {
+        console.warn('Skipping user without id', u);
+        continue;
+      }
+      // Skip duplicate users
+      if (seenUserIds.has(uid)) continue;
+      seenUserIds.add(uid);
       const name = u.attributes?.first_name ? `${u.attributes.first_name} ${u.attributes.last_name}` : (u.name || u.email || `User ${uid}`);
       const role = u.role || u.attributes?.role || 'employee';
       const dept = u.department || u.attributes?.department || 'Unknown';
@@ -71,12 +81,18 @@ const loadAdminData = async () => {
       try {
         const times = await apiService.getUserWorkingTimes(uid);
         const list = Array.isArray(times) ? times : [];
-        // Calculate week window (last 7 days)
-        const now = new Date();
-        const sevenDaysAgo = new Date(now);
-        sevenDaysAgo.setDate(now.getDate() - 7);
+  // Calculate week window (Monday → Sunday)
+  const weekNow = new Date();
+  // Determine Monday of the current week (local time). JS getDay(): 0 (Sun) .. 6 (Sat)
+  const startOfWeek = new Date(weekNow);
+  const day = weekNow.getDay();
+  // If today is Sunday (0), go back 6 days to Monday; otherwise shift to Monday
+  const diffToMonday = day === 0 ? -6 : (1 - day);
+  startOfWeek.setDate(weekNow.getDate() + diffToMonday);
+  startOfWeek.setHours(0,0,0,0);
+  const startOfNextWeek = new Date(startOfWeek.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-        // Sum durations for entries whose start_time/timestamp falls within the last 7 days
+  // Sum durations for entries whose start_time/timestamp falls within the current week (Mon-Sun)
         // Helper to compute hours for a single entry robustly
         const computeEntryHours = (t) => {
           // Try explicit hour-like fields first
@@ -101,20 +117,20 @@ const loadAdminData = async () => {
           if (isNaN(sd)) return 0;
           let ed = e ? new Date(e) : null;
           if ((!ed || isNaN(ed)) && (t.status === 'running' || t.status === 'in_progress' || t.status === 'active')) {
-            ed = now; // running entry — count up to now
+            ed = weekNow; // running entry — count up to now
           }
           if (!ed || isNaN(ed)) return 0;
           const diffHours = (ed.getTime() - sd.getTime()) / (1000 * 60 * 60);
           return diffHours > 0 ? diffHours : 0;
         };
 
-        // Sum hours for entries that start within the 7-day window
+        // Sum hours for entries that start within the current Monday-Sunday week
         const weekly = list.reduce((acc, t) => {
           const s = t.start_time || t.timestamp || t.created_at || t.start || t.date;
           if (!s) return acc;
           const sd = new Date(s);
           if (isNaN(sd)) return acc;
-          if (sd >= sevenDaysAgo && sd <= now) {
+          if (sd >= startOfWeek && sd < startOfNextWeek) {
             return acc + computeEntryHours(t);
           }
           return acc;
@@ -128,15 +144,32 @@ const loadAdminData = async () => {
         if (empIdx >= 0) emps[empIdx].hoursThisWeek = Math.round(weekly * 10) / 10;
 
         // Active/clocked-in count: check if any recent entry is currently running (or missing an end)
-        const activeNow = list.some(t => {
-          if (t.status === 'running' || t.status === 'in_progress') return true;
-          // if no explicit end/stop time and a start exists and it's recent, consider it running
-          const s = t.start_time || t.timestamp || t.created_at || t.start || t.date;
-          const e = t.end_time || t.stop_time || t.updated_at || t.end || t.stopped_at;
-          if (s && !e) return true;
-          return false;
+  // Determine today's boundary (local time) using the week reference time
+  const startOfToday = new Date(weekNow);
+  startOfToday.setHours(0,0,0,0);
+  const startOfTomorrow = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000);
+
+        // Count user as clocked-in today if the working-time endpoint returns any record with a start on today's local date
+        const hasTodayRecord = list.some(r => {
+          const sRaw = r.start_time ?? r.timestamp ?? r.created_at ?? r.start ?? r.date;
+          if (sRaw === undefined || sRaw === null || sRaw === '') return false;
+          // Try to parse numeric timestamps and ISO-like strings into a Date
+          let sDate = null;
+          if (typeof sRaw === 'number' || (/^\d+$/.test(String(sRaw)).valueOf())) {
+            const n = Number(sRaw);
+            sDate = new Date(n);
+          } else {
+            sDate = new Date(String(sRaw));
+          }
+          if (!isNaN(sDate.getTime())) {
+            // Compare local year/month/day
+            return sDate.getFullYear() === startOfToday.getFullYear() && sDate.getMonth() === startOfToday.getMonth() && sDate.getDate() === startOfToday.getDate();
+          }
+          // Fallback: compare date-prefix before 'T'
+          const datePart = String(sRaw).split('T')[0];
+          return datePart === startOfToday.toISOString().split('T')[0];
         });
-        if (activeNow) {
+        if (hasTodayRecord) {
           clockedInCount += 1;
           dm.activeToday += 1;
         }
@@ -339,7 +372,7 @@ const handleSaveUser = (userData) => {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Department</TableHead>
+                <!-- <TableHead>Department</TableHead> -->
                 <TableHead>Total Employees</TableHead>
                 <TableHead>Active Today</TableHead>
                 <TableHead>Avg Hours/Week</TableHead>
@@ -348,7 +381,7 @@ const handleSaveUser = (userData) => {
             </TableHeader>
             <TableBody>
               <TableRow v-for="(dept, index) in departmentStats" :key="index">
-                <TableCell>{{ dept.department }}</TableCell>
+                <!-- <TableCell>{{ dept.department }}</TableCell> -->
                 <TableCell>{{ dept.employees }}</TableCell>
                 <TableCell>
                   <Badge variant="default" class="bg-green-500 hover:bg-green-600">{{ dept.activeToday }}</Badge>
