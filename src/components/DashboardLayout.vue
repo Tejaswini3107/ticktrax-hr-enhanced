@@ -42,6 +42,20 @@ const roleConfig = {
       { icon: HelpCircle, label: "Help Center", id: "help" },
     ],
   },
+  hr: {
+    title: "HR Portal",
+    icon: Users,
+    menuItems: [
+      { icon: Home, label: "Dashboard", id: "dashboard" },
+      { icon: Users, label: "Employee Management", id: "employees" },
+      { icon: FileText, label: "Recruitment", id: "recruitment" },
+      { icon: TrendingUp, label: "Performance", id: "performance" },
+      { icon: Calendar, label: "Payroll", id: "payroll" },
+      { icon: Shield, label: "HR Reports", id: "reports" },
+      { icon: Settings, label: "HR Settings", id: "settings" },
+      { icon: HelpCircle, label: "Help Center", id: "help" },
+    ],
+  },
   admin: {
     title: "Admin Portal",
     icon: Shield,

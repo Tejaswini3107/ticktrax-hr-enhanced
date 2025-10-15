@@ -37,6 +37,13 @@ import EmployeeDashboard from './components/dashboards/EmployeeDashboard.vue';
 import ManagerDashboard from './components/dashboards/ManagerDashboard.vue';
 import AdminDashboard from './components/dashboards/AdminDashboard.vue';
 import ProfileDialog from './components/dialogs/ProfileDialog.vue';
+
+// Import HR side pages
+import EmployeeManagement from './components/hr/EmployeeManagement.vue';
+import Recruitment from './components/hr/Recruitment.vue';
+import PerformanceManagement from './components/hr/PerformanceManagement.vue';
+import PayrollManagement from './components/hr/PayrollManagement.vue';
+import HRReports from './components/hr/HRReports.vue';
 import { toast } from 'sonner';
 
 export default {
@@ -48,6 +55,12 @@ export default {
     ManagerDashboard,
     AdminDashboard,
     ProfileDialog,
+    // HR side pages
+    EmployeeManagement,
+    Recruitment,
+    PerformanceManagement,
+    PayrollManagement,
+    HRReports,
   },
   data() {
     return {
@@ -58,6 +71,25 @@ export default {
   },
   computed: {
     dashboardComponent() {
+      // Handle HR side pages
+      if (this.user.role === 'hr' || this.user.role === 'admin') {
+        switch (this.currentView) {
+          case 'employees':
+            return 'EmployeeManagement';
+          case 'recruitment':
+            return 'Recruitment';
+          case 'performance':
+            return 'PerformanceManagement';
+          case 'payroll':
+            return 'PayrollManagement';
+          case 'reports':
+            return 'HRReports';
+          default:
+            return 'HRDashboard';
+        }
+      }
+      
+      // Handle other roles
       switch (this.user.role) {
         case 'employee':
           return 'EmployeeDashboard';

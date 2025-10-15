@@ -8,7 +8,15 @@ import DashboardLayout from '../components/DashboardLayout.vue'
 import EmployeeDashboard from '../components/dashboards/EmployeeDashboard.vue'
 import ManagerDashboard from '../components/dashboards/ManagerDashboard.vue'
 import AdminDashboard from '../components/dashboards/AdminDashboard.vue'
+import HRDashboard from '../components/dashboards/HRDashboard.vue'
 import ProfileDialog from '../components/dialogs/ProfileDialog.vue'
+
+// Import HR side pages
+import EmployeeManagement from '../components/hr/EmployeeManagement.vue'
+import Recruitment from '../components/hr/Recruitment.vue'
+import PerformanceManagement from '../components/hr/PerformanceManagement.vue'
+import PayrollManagement from '../components/hr/PayrollManagement.vue'
+import HRReports from '../components/hr/HRReports.vue'
 
 // Define routes with authentication requirements
 const routes = [
@@ -94,6 +102,60 @@ const routes = [
         meta: { 
           requiresAuth: true,
           requiresRole: ['admin']
+        }
+      },
+      {
+        path: 'hr',
+        name: 'HRDashboard',
+        component: HRDashboard,
+        meta: { 
+          requiresAuth: true,
+          requiresRole: ['hr', 'admin']
+        }
+      },
+      {
+        path: 'hr/employees',
+        name: 'HREmployeeManagement',
+        component: EmployeeManagement,
+        meta: { 
+          requiresAuth: true,
+          requiresRole: ['hr', 'admin']
+        }
+      },
+      {
+        path: 'hr/recruitment',
+        name: 'HRRecruitment',
+        component: Recruitment,
+        meta: { 
+          requiresAuth: true,
+          requiresRole: ['hr', 'admin']
+        }
+      },
+      {
+        path: 'hr/performance',
+        name: 'HRPerformanceManagement',
+        component: PerformanceManagement,
+        meta: { 
+          requiresAuth: true,
+          requiresRole: ['hr', 'admin']
+        }
+      },
+      {
+        path: 'hr/payroll',
+        name: 'HRPayrollManagement',
+        component: PayrollManagement,
+        meta: { 
+          requiresAuth: true,
+          requiresRole: ['hr', 'admin']
+        }
+      },
+      {
+        path: 'hr/reports',
+        name: 'HRReports',
+        component: HRReports,
+        meta: { 
+          requiresAuth: true,
+          requiresRole: ['hr', 'admin']
         }
       }
     ]
