@@ -32,7 +32,7 @@ export const ScrollArea = {
       class: cn('relative overflow-hidden', props.class),
       ...delegatedProps.value
     }, [
-      h(ScrollAreaViewport, { class: 'h-full w-full rounded-[inherit]' }, slots.default?.()),
+      h(ScrollAreaViewport, { class: 'h-full w-full rounded-[inherit]' }, slots.default),
       h(ScrollBar),
       h(ScrollAreaCorner)
     ]);

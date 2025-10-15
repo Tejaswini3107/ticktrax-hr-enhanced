@@ -36,6 +36,7 @@ import DashboardLayout from './components/DashboardLayout.vue';
 import EmployeeDashboard from './components/dashboards/EmployeeDashboard.vue';
 import ManagerDashboard from './components/dashboards/ManagerDashboard.vue';
 import AdminDashboard from './components/dashboards/AdminDashboard.vue';
+import HRDashboard from './components/dashboards/HRDashboard.vue';
 import ProfileDialog from './components/dialogs/ProfileDialog.vue';
 import { toast } from 'sonner';
 
@@ -47,6 +48,7 @@ export default {
     EmployeeDashboard,
     ManagerDashboard,
     AdminDashboard,
+    HRDashboard,
     ProfileDialog,
   },
   data() {
@@ -64,7 +66,7 @@ export default {
         case 'manager':
           return 'ManagerDashboard';
         case 'hr':
-          return 'AdminDashboard'; // HR uses admin dashboard
+          return 'HRDashboard';
         case 'admin':
           return 'AdminDashboard';
         default:

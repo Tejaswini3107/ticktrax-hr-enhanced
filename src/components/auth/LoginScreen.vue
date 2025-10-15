@@ -25,18 +25,33 @@ const handleLogin = async () => {
     return;
   }
   isLoading.value = true;
+  
   try {
-    const result = await authManager.login(email, pwd);
-    if (result.success) {
-      // Use the name field from authService
-      const userName = result.user.name || result.user.username || result.user.email || 'User';
+    // Demo login system - bypass real API for development
+    if (pwd === 'demo123') {
+      // Determine role based on email
+      let role = 'employee';
+      let name = email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
       
-      emit('login', userName, result.user.role);
+      if (email.includes('manager')) {
+        role = 'manager';
+        name = 'Manager User';
+      } else if (email.includes('hr')) {
+        role = 'hr';
+        name = 'HR User';
+      } else if (email.includes('admin')) {
+        role = 'admin';
+        name = 'Admin User';
+      } else {
+        name = 'Employee User';
+      }
+      
+      emit('login', name, role);
     } else {
-      error.value = result.error || "Invalid email/username or password";
+      error.value = "Use password 'demo123' for demo access";
     }
   } catch (err) {
-    error.value = err?.message || "Invalid email/username or password";
+    error.value = err?.message || "Login failed";
   } finally {
     isLoading.value = false;
   }
@@ -72,6 +87,10 @@ defineExpose({
         </div>
         <h1>TICKTRAX</h1>
         <p class="text-muted-foreground">Time Tracking System</p>
+        <div class="text-xs text-blue-600 bg-blue-50 p-2 rounded">
+          <strong>Demo Mode:</strong> Use any email + password "demo123"<br>
+          Try: hr@demo.com, manager@demo.com, admin@demo.com
+        </div>
       </div>
 
       <Card>

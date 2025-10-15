@@ -16,9 +16,7 @@ import {
   RefreshCw,
 } from 'lucide-vue-next';
 import Badge from '../ui/badge.vue';
-import { useToast } from '../ui/toast/use-toast.js';
-
-const { toast } = useToast();
+import { toast } from 'vue-sonner';
 
 const location = ref('');
 const isLoadingLocation = ref(false);
@@ -106,10 +104,7 @@ const fetchLocation = async () => {
       location.value = mockLocations[locationIndex];
       locationError.value = null;
 
-      toast({
-        title: 'Success',
-        description: 'Location detected successfully',
-      });
+      toast.success('Location detected successfully');
     } else {
       throw new Error('Geolocation not supported by this browser');
     }
@@ -125,21 +120,9 @@ const fetchLocation = async () => {
     location.value = 'Warehouse - General Area';
 
     if (errorMessage.includes('denied')) {
-      toast({
-        title: 'Location access blocked',
-        description:
-          "Click the location icon in your browser's address bar to enable location access.",
-        duration: 5000,
-        variant: 'destructive',
-      });
+      toast.error("Location access blocked. Click the location icon in your browser's address bar to enable location access.");
     } else {
-      toast({
-        title: 'Using default location',
-        description:
-          'You can manually change the location if needed.',
-        duration: 3000,
-        variant: 'warning',
-      });
+      toast.warning('Using default location. You can manually change the location if needed.');
     }
   } finally {
     isLoadingLocation.value = false;

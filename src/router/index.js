@@ -8,6 +8,7 @@ import DashboardLayout from '../components/DashboardLayout.vue'
 import EmployeeDashboard from '../components/dashboards/EmployeeDashboard.vue'
 import ManagerDashboard from '../components/dashboards/ManagerDashboard.vue'
 import AdminDashboard from '../components/dashboards/AdminDashboard.vue'
+import HRDashboard from '../components/dashboards/HRDashboard.vue'
 import ProfileDialog from '../components/dialogs/ProfileDialog.vue'
 
 // Define routes with authentication requirements
@@ -77,7 +78,7 @@ const routes = [
               // Route based on role
               if (role === 'admin') return '/dashboard/admin';
               if (role === 'manager') return '/dashboard/manager';
-              if (role === 'hr') return '/dashboard/admin'; // HR uses admin dashboard
+              if (role === 'hr') return '/dashboard/hr';
               return '/dashboard/employee';
             } catch (e) {
               return '/dashboard/employee';
@@ -111,7 +112,16 @@ const routes = [
         component: AdminDashboard,
         meta: { 
           requiresAuth: true,
-          requiresRole: ['admin', 'hr']
+          requiresRole: ['admin']
+        }
+      },
+      {
+        path: 'hr',
+        name: 'HRDashboard',
+        component: HRDashboard,
+        meta: { 
+          requiresAuth: true,
+          requiresRole: ['hr', 'admin']
         }
       }
     ]

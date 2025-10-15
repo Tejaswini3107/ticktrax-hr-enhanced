@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { ThemeProvider } from './components/ThemeProvider.vue';
 import MobileAppWrapper from './components/mobile/MobileAppWrapper.vue';
 import LoginScreen from './components/auth/LoginScreen.vue';
@@ -7,6 +7,7 @@ import DashboardLayout from './components/DashboardLayout.vue';
 import EmployeeDashboard from './components/dashboards/EmployeeDashboard.vue';
 import ManagerDashboard from './components/dashboards/ManagerDashboard.vue';
 import AdminDashboard from './components/dashboards/AdminDashboard.vue';
+import HRDashboard from './components/dashboards/HRDashboard.vue';
 import ProfileDialog from './components/dialogs/ProfileDialog.vue';
 import Toaster from './components/ui/sonner.vue';
 import { toast } from 'vue-sonner';
@@ -135,8 +136,8 @@ const dashboardContent = computed(() => {
       componentName = 'ManagerDashboard';
       break;
     case "hr":
-      component = AdminDashboard; // HR uses admin dashboard
-      componentName = 'AdminDashboard (HR)';
+      component = HRDashboard;
+      componentName = 'HRDashboard';
       break;
     case "employee":
       component = EmployeeDashboard;
