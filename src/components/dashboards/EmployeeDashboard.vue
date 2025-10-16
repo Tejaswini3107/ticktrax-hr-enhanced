@@ -123,18 +123,71 @@ const loadDashboard = async () => {
   isLoading.value = true;
   loadError.value = null;
   try {
-    const userRes = await authManager.getCurrentUser();
-    const user = userRes?.data;
-    if (!user || !user.id) throw new Error('No authenticated user');
-    const data = await apiService.getUserWorkingTimes(user.id);
-    const entries = Array.isArray(data) ? data : (data?.data || []);
-  // Sort entries in chronological order (oldest first) using numeric timestamp
-  const normalized = entries.map(normalizeEntry).sort((a, b) => (Number(a._ts || 0) - Number(b._ts || 0)));
-  recentEntries.value = normalized.slice(-10); // keep the most recent 10 (chronological order)
-    computeStats(normalized);
+    if (!authManager.isAuthenticated()) {
+      console.log('🚀 User not authenticated, skipping dashboard load');
+      return;
+    }
+
+    // Load dashboard analytics using new API
+    const analyticsData = await apiService.getDashboardAnalytics({
+      start_date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days ago
+      end_date: new Date().toISOString().split('T')[0] // today
+    });
+
+    // Load recent time entries
+    const timeEntries = await apiService.getTimeEntries({
+      start_date: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 7 days ago
+      end_date: new Date().toISOString().split('T')[0], // today
+      limit: 10
+    });
+
+    // Update recent entries
+    if (timeEntries && timeEntries.data) {
+      const entries = Array.isArray(timeEntries.data) ? timeEntries.data : [];
+      recentEntries.value = entries.map(entry => ({
+        id: entry.id,
+        clock_in: entry.clock_in,
+        clock_out: entry.clock_out,
+        total_hours: entry.total_hours,
+        work_location: entry.work_location,
+        status: entry.status,
+        _ts: new Date(entry.clock_in).getTime()
+      }));
+    }
+
+    // Update stats with analytics data
+    if (analyticsData && analyticsData.data) {
+      stats.value = [
+        { 
+          label: 'Hours This Week', 
+          value: analyticsData.data.weekly_hours?.toFixed(1) || '0', 
+          icon: TrendingUp 
+        },
+        { 
+          label: 'Hours This Month', 
+          value: analyticsData.data.total_hours?.toFixed(1) || '0', 
+          icon: Calendar 
+        },
+        { 
+          label: 'Attendance Rate', 
+          value: `${analyticsData.data.attendance_rate?.toFixed(1) || '0'}%`, 
+          icon: AlertCircle 
+        },
+      ];
+    }
+
+    console.log('📊 Dashboard loaded:', { analyticsData, timeEntries });
   } catch (err) {
-    console.error('Load dashboard failed', err);
+    console.error('Load dashboard failed:', err);
     loadError.value = err.message || String(err);
+    
+    // Fallback to empty state
+    recentEntries.value = [];
+    stats.value = [
+      { label: 'Hours This Week', value: '0', icon: TrendingUp },
+      { label: 'Hours This Month', value: '0', icon: Calendar },
+      { label: 'Pending Entries', value: '0', icon: AlertCircle },
+    ];
   } finally {
     isLoading.value = false;
   }

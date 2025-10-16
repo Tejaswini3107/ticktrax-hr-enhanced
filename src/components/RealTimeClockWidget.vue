@@ -197,6 +197,12 @@ export default {
      */
     async function initializeRealTime() {
       try {
+        // Only initialize if user is authenticated
+        if (!authManager.isAuthenticated()) {
+          console.log('🚀 User not authenticated, skipping real-time initialization')
+          return
+        }
+
         console.log('🚀 Initializing real-time features...')
         
         // Connect to WebSocket

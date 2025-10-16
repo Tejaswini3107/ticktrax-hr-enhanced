@@ -20,19 +20,38 @@ const handleLogin = async () => {
   error.value = "";
   const emailVal = (email.value || '').trim();
   const pwd = (password.value || '').trim();
-  if (!email || !pwd) {
+  if (!emailVal || !pwd) {
     error.value = "Email and password are required";
     return;
   }
   isLoading.value = true;
   try {
     const result = await authManager.login(emailVal, pwd);
-    if (result.success) {
-      emit('login', `${result.user.first_name} ${result.user.last_name}`, result.user.role);
+    if (result.success && result.user) {
+      // Create user display name from available fields
+      const firstName = result.user.first_name || '';
+      const lastName = result.user.last_name || '';
+      const username = result.user.username || '';
+      const email = result.user.email || '';
+      
+      // Use first name + last name, fallback to username, then email
+      let displayName = '';
+      if (firstName && lastName) {
+        displayName = `${firstName} ${lastName}`;
+      } else if (username) {
+        displayName = username;
+      } else if (email) {
+        displayName = email.split('@')[0]; // Use email prefix
+      } else {
+        displayName = 'User';
+      }
+      
+      emit('login', displayName, result.user.role);
     } else {
       error.value = result.error || "Invalid email or password";
     }
   } catch (err) {
+    console.error('Login error:', err);
     error.value = err?.message || "Invalid email or password";
   } finally {
     isLoading.value = false;

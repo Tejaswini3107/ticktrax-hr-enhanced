@@ -85,7 +85,7 @@
         </div>
 
         <div v-else-if="currentView === 'analytics'">
-          <Analytics />
+          <!-- Analytics component removed -->
         </div>
 
         <div v-else-if="currentView === 'settings'">
@@ -168,7 +168,7 @@ import Approvals from './Approvals.vue';
 import Alerts from './Alerts.vue';
 import TeamOverview from './TeamOverview.vue';
 import EmployeeManagement from './EmployeeManagement.vue';
-import Analytics from './Analytics.vue';
+// Analytics component removed
 import Settings from './Settings.vue';
 import Profile from './Profile.vue';
 import DashboardLayout from '../DashboardLayout.vue';

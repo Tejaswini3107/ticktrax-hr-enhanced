@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { ThemeProvider } from './components/ThemeProvider.vue';
 import MobileAppWrapper from './components/mobile/MobileAppWrapper.vue';
 import LoginScreen from './components/auth/LoginScreen.vue';
@@ -7,15 +7,26 @@ import DashboardLayout from './components/DashboardLayout.vue';
 import EmployeeDashboard from './components/dashboards/EmployeeDashboard.vue';
 import ManagerDashboard from './components/dashboards/ManagerDashboard.vue';
 import AdminDashboard from './components/dashboards/AdminDashboard.vue';
+import HRDashboard from './components/dashboards/HRDashboard.vue';
 import ProfileDialog from './components/dialogs/ProfileDialog.vue';
 import Toaster from './components/ui/sonner.vue';
 import { toast } from 'vue-sonner';
 import authManager from './services/authService.js';
 import mobileService from './services/mobileService.js';
-import './utils/apiTest.js'; // Auto-test API connection
+// import './utils/apiTest.js'; // Auto-test API connection - disabled to prevent startup API calls
 
 const user = ref(null);
 const currentView = ref("dashboard");
+
+// Debug currentView changes
+watch(currentView, (newView, oldView) => {
+  // Navigation tracking
+}, { immediate: true });
+
+// Watch user changes
+watch(user, (newUser, oldUser) => {
+  // User state tracking
+}, { immediate: true, deep: true });
 const isProfileOpen = ref(false);
 const isMobileApp = ref(false);
 
@@ -73,6 +84,8 @@ const dashboardContent = computed(() => {
       return EmployeeDashboard;
     case "manager":
       return ManagerDashboard;
+    case "hr":
+      return HRDashboard;
     case "admin":
       return AdminDashboard;
     default:
@@ -97,18 +110,21 @@ const setDashboard = () => {
 // Check for existing authentication on app startup
 onMounted(async () => {
   try {
-    const current = await authManager.getCurrentUser();
-    if (current && current.success && current.data) {
-      const profile = current.data;
-      user.value = {
-        name: profile.name || `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || profile.email,
-        role: profile.role || 'employee'
-      };
-      setDashboard();
-      toast.success('Welcome back!');
+    // Only check for current user if already authenticated
+    if (authManager.isAuthenticated()) {
+      const current = await authManager.getCurrentUser();
+      if (current && current.success && current.data) {
+        const profile = current.data;
+        user.value = {
+          name: profile.name || `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || profile.email,
+          role: profile.role || 'employee'
+        };
+        setDashboard();
+        toast.success('Welcome back!');
+      }
     }
   } catch (error) {
-    console.log('No authenticated user on startup');
+    // No authenticated user on startup
   }
 });
 </script>

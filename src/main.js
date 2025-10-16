@@ -17,10 +17,13 @@ try {
 	console.warn('Token initialization failed:', e);
 }
 
-// Warm current user (try API then localStorage) to avoid refresh race that redirects to login
+// Only warm up user if already authenticated to avoid unnecessary API calls
 (async () => {
 	try {
-		await authManager.getCurrentUser();
+		// Check if user is authenticated before making API calls
+		if (authManager.isAuthenticated()) {
+			await authManager.getCurrentUser();
+		}
 	} catch (e) {
 		// ignore - getCurrentUser is resilient and will fallback
 	} finally {

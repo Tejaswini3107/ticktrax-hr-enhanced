@@ -1,644 +1,526 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue';
-import Card from "../ui/card.vue";
-import { CardContent, CardHeader, CardTitle } from "../ui/card-components.vue";
-import Button from "../ui/button.vue";
+import { ref, computed, onMounted } from 'vue';
+import { Card } from '../ui/card.vue';
+import { CardContent, CardHeader, CardTitle } from '../ui/card-components.vue';
+import Button from '../ui/button.vue';
+import Badge from '../ui/badge.vue';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs.vue';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table.vue';
 import { 
-  BarChart3, 
-  PieChart, 
-  TrendingUp, 
-  Download,
-  Calendar,
-  Filter,
-  FileText,
-  Users,
-  Building2,
-  Target,
-  DollarSign,
-  Activity,
-  Clock,
-  Award,
-  AlertTriangle,
-  CheckCircle,
-  UserPlus,
-  UserMinus,
-  ArrowUp,
-  ArrowDown,
-  Minus
-} from "lucide-vue-next";
-import Badge from "../ui/badge.vue";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table.vue";
-import { Progress } from "../ui/progress.vue";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select.vue";
-import { Input } from "../ui/input.vue";
-import { Label } from "../ui/label.vue";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs.vue";
-import { toast } from 'vue-sonner';
-import { apiService } from '../../services/apiService.js';
+  Download, 
+  Calendar, 
+  Users, 
+  DollarSign, 
+  Clock, 
+  AlertCircle 
+} from 'lucide-vue-next';
+import apiService from '../../services/apiService.js';
 
-// State management
-const isLoading = ref(false);
-const activeTab = ref('overview');
-const selectedPeriod = ref('current');
-const selectedDepartment = ref('all');
-const reportType = ref('summary');
-
-// Data
-const employees = ref([]);
-const departments = ref([]);
-const attendanceData = ref([]);
-const performanceData = ref([]);
-const payrollData = ref([]);
-const turnoverData = ref([]);
-
-// HR Analytics
-const hrAnalytics = ref({
+// Real-time data from APIs
+const loading = ref(false);
+const summaryStats = ref({
   totalEmployees: 0,
-  newHires: 0,
-  departures: 0,
-  turnoverRate: 0,
-  averageTenure: 0,
-  diversityScore: 0,
-  satisfactionScore: 0,
-  productivityScore: 0
+  monthlyPayroll: 0,
+  totalHours: 0,
+  complianceIssues: 0
 });
 
-// Load data
-const loadHRAnalytics = async () => {
-  isLoading.value = true;
+const payrollData = ref([]);
+const departmentCostsData = ref([]);
+const complianceData = ref([]);
+const turnoverData = ref([]);
+const laborDistribution = ref([]);
+
+// Load all reports data
+const loadReportsData = async () => {
+  loading.value = true;
   try {
-    // Load employees and departments
-    const employeesRes = await apiService.listUsers();
-    if (employeesRes && Array.isArray(employeesRes)) {
-      employees.value = employeesRes;
-    }
+    // Load summary stats from individual APIs
+    const users = await apiService.listUsers();
+    const teams = await apiService.getTeams();
+    const compliance = await apiService.getComplianceIssues();
     
-    const teamsRes = await apiService.listTeams();
-    if (teamsRes && Array.isArray(teamsRes)) {
-      departments.value = teamsRes;
-    }
-    
-    // Load real analytics data
-    let analyticsData = {};
-    try {
-      const analyticsRes = await apiService.getAnalyticsOverview();
-      if (analyticsRes) {
-        analyticsData = analyticsRes;
-      }
-    } catch (e) {
-      console.log('Analytics not available:', e);
-    }
-    
-    // Load attendance analytics
-    try {
-      const attendanceRes = await apiService.getAttendanceAnalytics({
-        start_date: new Date(Date.now() - 6 * 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        end_date: new Date().toISOString().split('T')[0]
-      });
-      if (attendanceRes) {
-        // Process real attendance data
-        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-        attendanceData.value = months.map((month, index) => ({
-          month,
-          attendance: analyticsData.attendance_rate || Math.floor(Math.random() * 10) + 90,
-          late: Math.floor(Math.random() * 5),
-          absent: Math.floor(Math.random() * 3)
-        }));
-      }
-    } catch (e) {
-      console.log('Attendance analytics not available:', e);
-      // Fallback to generated data
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-      attendanceData.value = months.map((month, index) => ({
-        month,
-        attendance: Math.floor(Math.random() * 10) + 90,
-        late: Math.floor(Math.random() * 5),
-        absent: Math.floor(Math.random() * 3)
+    summaryStats.value = {
+      totalEmployees: users?.data?.length || 0,
+      monthlyPayroll: 0, // Will be calculated from payroll data
+      totalHours: 0, // Will be calculated from time entries
+      complianceIssues: compliance?.data?.length || 0
+    };
+
+    // Load payroll trends
+    const payrollReport = await apiService.getPayrollReport({
+      startDate: new Date(Date.now() - 6 * 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      endDate: new Date().toISOString().split('T')[0]
+    });
+    if (payrollReport && payrollReport.data) {
+      payrollData.value = payrollReport.data.map(entry => ({
+        month: entry.month || entry.period,
+        regular: entry.regular_pay || 0,
+        overtime: entry.overtime_pay || 0,
+        total: (entry.regular_pay || 0) + (entry.overtime_pay || 0)
       }));
     }
-    
-    // Generate performance data based on real departments
-    performanceData.value = departments.value.map((dept, index) => ({
-      department: dept.name,
-      averageRating: Math.random() * 1.5 + 3.5, // 3.5 to 5.0
-      goalsAchieved: Math.floor(Math.random() * 30) + 70,
-      reviewsCompleted: Math.floor(Math.random() * 20) + 80
-    }));
-    
-    // Generate payroll data based on real departments
-    payrollData.value = departments.value.map((dept, index) => ({
-      department: dept.name,
-      totalPayroll: Math.floor(Math.random() * 200000) + 100000,
-      averageSalary: Math.floor(Math.random() * 30000) + 80000,
-      benefits: Math.floor(Math.random() * 20000) + 10000
-    }));
-    
-    // Generate turnover data based on real employee data
-    const currentMonth = new Date().getMonth();
-    const currentYear = new Date().getFullYear();
-    
-    const newHires = employees.value.filter(emp => {
-      if (emp.created_at) {
-        const empDate = new Date(emp.created_at);
-        return empDate.getMonth() === currentMonth && empDate.getFullYear() === currentYear;
-      }
-      return false;
+
+    // Load department costs
+    if (teams && teams.data) {
+      departmentCostsData.value = teams.data.map(team => ({
+        dept: team.name || 'Unknown',
+        employees: team.member_count || 0,
+        avgHours: team.average_hours || 0,
+        totalCost: team.total_cost || 0
+      }));
+    }
+
+      // Load compliance data
+      if (compliance && compliance.data) {
+      complianceData.value = compliance.data.map(issue => ({
+        metric: issue.issue_type || 'Unknown Issue',
+        value: issue.count || 0,
+        status: issue.severity === 'high' ? 'warning' : 'compliant',
+        target: 0
+      }));
+    }
+
+    // Load turnover data
+    const turnover = await apiService.getTurnoverReport({
+      startDate: new Date(Date.now() - 6 * 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      endDate: new Date().toISOString().split('T')[0]
     });
-    
-    turnoverData.value = [
-      { month: 'Jan', hires: Math.floor(Math.random() * 5) + 1, departures: Math.floor(Math.random() * 3), net: 0 },
-      { month: 'Feb', hires: Math.floor(Math.random() * 5) + 1, departures: Math.floor(Math.random() * 3), net: 0 },
-      { month: 'Mar', hires: Math.floor(Math.random() * 5) + 1, departures: Math.floor(Math.random() * 3), net: 0 },
-      { month: 'Apr', hires: Math.floor(Math.random() * 5) + 1, departures: Math.floor(Math.random() * 3), net: 0 },
-      { month: 'May', hires: Math.floor(Math.random() * 5) + 1, departures: Math.floor(Math.random() * 3), net: 0 },
-      { month: 'Jun', hires: newHires.length, departures: Math.floor(Math.random() * 3), net: newHires.length }
-    ];
-    
-    // Calculate analytics from real data
-    hrAnalytics.value = {
-      totalEmployees: employees.value.length,
-      newHires: newHires.length,
-      departures: Math.floor(Math.random() * 5), // Mock for now
-      turnoverRate: Math.random() * 10 + 5, // 5-15%
-      averageTenure: Math.random() * 3 + 2, // 2-5 years
-      diversityScore: Math.floor(Math.random() * 30) + 70, // 70-100%
-      satisfactionScore: Math.random() * 1.5 + 3.5, // 3.5-5.0
-      productivityScore: Math.floor(Math.random() * 20) + 80 // 80-100%
-    };
-    
+    if (turnover && turnover.data) {
+      turnoverData.value = turnover.data.map(entry => ({
+        month: entry.month || entry.period,
+        hires: entry.hires || 0,
+        terminations: entry.terminations || 0,
+        netChange: (entry.hires || 0) - (entry.terminations || 0)
+      }));
+    }
+
+    // Load labor distribution
+    const labor = await apiService.getLaborDistribution();
+    if (labor && labor.data) {
+      laborDistribution.value = labor.data.map(entry => ({
+        hour: entry.hour || entry.time_period,
+        employees: entry.employee_count || 0
+      }));
+    }
   } catch (error) {
-    console.error('Error loading HR analytics:', error);
-    toast.error('Failed to load HR analytics');
+    console.warn('Failed to load reports data:', error);
+    // Keep empty arrays if API fails
   } finally {
-    isLoading.value = false;
+    loading.value = false;
   }
 };
 
-// Computed properties
-const filteredPerformanceData = computed(() => {
-  if (selectedDepartment.value === 'all') {
-    return performanceData.value;
-  }
-  return performanceData.value.filter(dept => dept.department === selectedDepartment.value);
-});
-
-const filteredPayrollData = computed(() => {
-  if (selectedDepartment.value === 'all') {
-    return payrollData.value;
-  }
-  return payrollData.value.filter(dept => dept.department === selectedDepartment.value);
-});
-
-const topPerformers = computed(() => {
-  return performanceData.value
-    .sort((a, b) => b.averageRating - a.averageRating)
-    .slice(0, 3);
-});
-
-const departmentStats = computed(() => {
-  return departments.value.map(dept => ({
-    name: dept.name,
-    employees: Math.floor(Math.random() * 20) + 5,
-    turnover: Math.random() * 15,
-    satisfaction: Math.random() * 2 + 3,
-    productivity: Math.random() * 20 + 70
-  }));
-});
-
-// Actions
-const handleGenerateReport = () => {
-  toast.info('Generate custom report functionality coming soon');
-};
-
-const handleExportReport = () => {
-  toast.info('Export report functionality coming soon');
-};
-
-const handleScheduleReport = () => {
-  toast.info('Schedule report functionality coming soon');
-};
-
-const getTrendIcon = (current, previous) => {
-  if (current > previous) return ArrowUp;
-  if (current < previous) return ArrowDown;
-  return Minus;
-};
-
-const getTrendColor = (current, previous) => {
-  if (current > previous) return 'text-green-600';
-  if (current < previous) return 'text-red-600';
-  return 'text-gray-600';
-};
-
-// Lifecycle
+// Load data on mount
 onMounted(() => {
-  loadHRAnalytics();
+  loadReportsData();
 });
+
+// Simple chart component (since we don't have recharts in Vue)
+const SimpleBarChart = {
+  props: ['data', 'width', 'height'],
+  template: `
+    <div class="chart-container" :style="{ width: width + 'px', height: height + 'px' }">
+      <svg :width="width" :height="height" class="chart">
+        <g v-for="(item, index) in data" :key="index">
+          <rect 
+            :x="index * (width / data.length) + 10" 
+            :y="height - (item.value / maxValue) * (height - 40) - 20"
+            :width="(width / data.length) - 20" 
+            :height="(item.value / maxValue) * (height - 40)"
+            :fill="getBarColor(index)"
+            class="bar"
+          />
+          <text 
+            :x="index * (width / data.length) + (width / data.length) / 2" 
+            :y="height - 5"
+            text-anchor="middle" 
+            class="chart-label"
+          >{{ item.label }}</text>
+        </g>
+      </svg>
+    </div>
+  `,
+  computed: {
+    maxValue() {
+      return Math.max(...this.data.map(item => item.value));
+    }
+  },
+  methods: {
+    getBarColor(index) {
+      const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+      return colors[index % colors.length];
+    }
+  }
+};
+
+const SimpleLineChart = {
+  props: ['data', 'width', 'height'],
+  template: `
+    <div class="chart-container" :style="{ width: width + 'px', height: height + 'px' }">
+      <svg :width="width" :height="height" class="chart">
+        <polyline 
+          :points="linePoints"
+          fill="none"
+          stroke="#3b82f6"
+          stroke-width="2"
+          class="line"
+        />
+        <circle 
+          v-for="(point, index) in points" 
+          :key="index"
+          :cx="point.x" 
+          :cy="point.y" 
+          r="4" 
+          fill="#3b82f6"
+          class="dot"
+        />
+        <text 
+          v-for="(item, index) in data" 
+          :key="index"
+          :x="index * (width / (data.length - 1)) + 10" 
+          :y="height - 5"
+          text-anchor="middle" 
+          class="chart-label"
+        >{{ item.label }}</text>
+      </svg>
+    </div>
+  `,
+  computed: {
+    points() {
+      return this.data.map((item, index) => ({
+        x: index * (this.width / (this.data.length - 1)) + 10,
+        y: this.height - (item.value / this.maxValue) * (this.height - 40) - 20
+      }));
+    },
+    linePoints() {
+      return this.points.map(p => `${p.x},${p.y}`).join(' ');
+    },
+    maxValue() {
+      return Math.max(...this.data.map(item => item.value));
+    }
+  }
+};
 </script>
 
 <template>
   <div class="space-y-6">
-    <!-- Header -->
     <div class="flex items-center justify-between">
       <div>
         <h2 class="text-2xl font-bold">HR Reports & Analytics</h2>
-        <p class="text-muted-foreground mt-1">Comprehensive workforce insights and analytics</p>
+        <p class="text-muted-foreground mt-1">
+          Comprehensive workforce analytics and compliance monitoring
+        </p>
       </div>
       <div class="flex gap-2">
-        <Button variant="outline" class="gap-2" @click="handleScheduleReport">
+        <Button variant="outline" class="gap-2">
           <Calendar class="h-4 w-4" />
-          Schedule
+          This Month
         </Button>
-        <Button variant="outline" class="gap-2" @click="handleExportReport">
+        <Button class="gap-2">
           <Download class="h-4 w-4" />
-          Export
-        </Button>
-        <Button class="gap-2" @click="handleGenerateReport">
-          <FileText class="h-4 w-4" />
-          Generate Report
+          Export All
         </Button>
       </div>
     </div>
 
-    <!-- Filters -->
-    <Card>
-      <CardContent class="pt-6">
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <Label for="period">Time Period</Label>
-            <Select v-model="selectedPeriod">
-              <SelectTrigger>
-                <SelectValue placeholder="Select period" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="current">Current Month</SelectItem>
-                <SelectItem value="last">Last Month</SelectItem>
-                <SelectItem value="quarter">This Quarter</SelectItem>
-                <SelectItem value="year">This Year</SelectItem>
-                <SelectItem value="custom">Custom Range</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          
-          <div>
-            <Label for="department">Department</Label>
-            <Select v-model="selectedDepartment">
-              <SelectTrigger>
-                <SelectValue placeholder="All Departments" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                <SelectItem v-for="dept in departments" :key="dept.id" :value="dept.name">
-                  {{ dept.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          
-          <div>
-            <Label for="reportType">Report Type</Label>
-            <Select v-model="reportType">
-              <SelectTrigger>
-                <SelectValue placeholder="Select report type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="summary">Summary Report</SelectItem>
-                <SelectItem value="detailed">Detailed Report</SelectItem>
-                <SelectItem value="executive">Executive Summary</SelectItem>
-                <SelectItem value="custom">Custom Report</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-
-    <!-- Key Metrics -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+    <!-- Executive Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
       <Card>
         <CardContent class="pt-6">
-          <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+              <Users class="h-5 w-5 text-primary" />
+            </div>
             <div>
               <p class="text-sm text-muted-foreground">Total Employees</p>
-              <p class="text-2xl font-bold">{{ hrAnalytics.totalEmployees }}</p>
-              <div class="flex items-center gap-1 mt-1">
-                <UserPlus class="h-3 w-3 text-green-600" />
-                <span class="text-xs text-green-600">+{{ hrAnalytics.newHires }} this month</span>
-              </div>
+              <p class="mt-1 text-xl font-semibold">{{ summaryStats.totalEmployees || 0 }}</p>
             </div>
-            <Users class="h-8 w-8 text-blue-600" />
           </div>
         </CardContent>
       </Card>
-      
+
       <Card>
         <CardContent class="pt-6">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-muted-foreground">Turnover Rate</p>
-              <p class="text-2xl font-bold">{{ hrAnalytics.turnoverRate }}%</p>
-              <div class="flex items-center gap-1 mt-1">
-                <UserMinus class="h-3 w-3 text-red-600" />
-                <span class="text-xs text-red-600">{{ hrAnalytics.departures }} departures</span>
-              </div>
+          <div class="flex items-center gap-3">
+            <div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+              <DollarSign class="h-5 w-5 text-primary" />
             </div>
-            <TrendingUp class="h-8 w-8 text-orange-600" />
+            <div>
+              <p class="text-sm text-muted-foreground">Monthly Payroll</p>
+              <p class="mt-1 text-xl font-semibold">${{ summaryStats.monthlyPayroll || 0 }}</p>
+            </div>
           </div>
         </CardContent>
       </Card>
-      
+
       <Card>
         <CardContent class="pt-6">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-muted-foreground">Satisfaction Score</p>
-              <p class="text-2xl font-bold">{{ hrAnalytics.satisfactionScore }}/5</p>
-              <div class="flex items-center gap-1 mt-1">
-                <CheckCircle class="h-3 w-3 text-green-600" />
-                <span class="text-xs text-green-600">Above average</span>
-              </div>
+          <div class="flex items-center gap-3">
+            <div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+              <Clock class="h-5 w-5 text-primary" />
             </div>
-            <Award class="h-8 w-8 text-yellow-600" />
+            <div>
+              <p class="text-sm text-muted-foreground">Total Hours</p>
+              <p class="mt-1 text-xl font-semibold">{{ summaryStats.totalHours || 0 }}</p>
+            </div>
           </div>
         </CardContent>
       </Card>
-      
+
       <Card>
         <CardContent class="pt-6">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-muted-foreground">Productivity Score</p>
-              <p class="text-2xl font-bold">{{ hrAnalytics.productivityScore }}%</p>
-              <div class="flex items-center gap-1 mt-1">
-                <Activity class="h-3 w-3 text-blue-600" />
-                <span class="text-xs text-blue-600">High performance</span>
-              </div>
+          <div class="flex items-center gap-3">
+            <div class="h-10 w-10 rounded-lg bg-red-500/10 flex items-center justify-center">
+              <AlertCircle class="h-5 w-5 text-red-600" />
             </div>
-            <Target class="h-8 w-8 text-purple-600" />
+            <div>
+              <p class="text-sm text-muted-foreground">Compliance Issues</p>
+              <p class="mt-1 text-xl font-semibold">{{ summaryStats.complianceIssues || 0 }}</p>
+            </div>
           </div>
         </CardContent>
       </Card>
     </div>
 
-    <!-- Main Content -->
-    <Tabs v-model="activeTab" class="space-y-4">
+    <Tabs default-value="payroll" class="space-y-4">
       <TabsList>
-        <TabsTrigger value="overview">Overview</TabsTrigger>
-        <TabsTrigger value="attendance">Attendance</TabsTrigger>
-        <TabsTrigger value="performance">Performance</TabsTrigger>
         <TabsTrigger value="payroll">Payroll</TabsTrigger>
+        <TabsTrigger value="departments">Departments</TabsTrigger>
+        <TabsTrigger value="compliance">Compliance</TabsTrigger>
         <TabsTrigger value="turnover">Turnover</TabsTrigger>
+        <TabsTrigger value="labor">Labor Distribution</TabsTrigger>
       </TabsList>
-      
-      <!-- Overview Tab -->
-      <TabsContent value="overview" class="space-y-4">
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <!-- Department Performance -->
-          <Card>
-            <CardHeader>
-              <CardTitle>Department Performance</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div class="space-y-4">
-                <div v-for="dept in departmentStats" :key="dept.name" class="space-y-2">
-                  <div class="flex items-center justify-between">
-                    <span class="font-medium">{{ dept.name }}</span>
-                    <span class="text-sm text-muted-foreground">{{ dept.employees }} employees</span>
-                  </div>
-                  <div class="grid grid-cols-3 gap-4 text-sm">
-                    <div>
-                      <div class="text-muted-foreground">Turnover</div>
-                      <div class="font-medium">{{ dept.turnover.toFixed(1) }}%</div>
-                    </div>
-                    <div>
-                      <div class="text-muted-foreground">Satisfaction</div>
-                      <div class="font-medium">{{ dept.satisfaction.toFixed(1) }}/5</div>
-                    </div>
-                    <div>
-                      <div class="text-muted-foreground">Productivity</div>
-                      <div class="font-medium">{{ dept.productivity.toFixed(0) }}%</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <!-- Top Performers -->
-          <Card>
-            <CardHeader>
-              <CardTitle>Top Performing Departments</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div class="space-y-4">
-                <div v-for="(performer, index) in topPerformers" :key="performer.department" class="flex items-center justify-between">
-                  <div class="flex items-center gap-3">
-                    <div class="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
-                      <span class="text-sm font-bold">{{ index + 1 }}</span>
-                    </div>
-                    <div>
-                      <div class="font-medium">{{ performer.department }}</div>
-                      <div class="text-sm text-muted-foreground">{{ performer.goalsAchieved }}% goals achieved</div>
-                    </div>
-                  </div>
-                  <div class="text-right">
-                    <div class="font-medium">{{ performer.averageRating }}/5</div>
-                    <div class="text-sm text-muted-foreground">Rating</div>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </TabsContent>
-      
-      <!-- Attendance Tab -->
-      <TabsContent value="attendance" class="space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Attendance Trends</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Month</TableHead>
-                  <TableHead>Attendance Rate</TableHead>
-                  <TableHead>Late Arrivals</TableHead>
-                  <TableHead>Absences</TableHead>
-                  <TableHead>Trend</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow v-for="(data, index) in attendanceData" :key="data.month">
-                  <TableCell class="font-medium">{{ data.month }}</TableCell>
-                  <TableCell>
-                    <div class="flex items-center gap-2">
-                      <Progress :value="data.attendance" class="w-16" />
-                      <span class="font-medium">{{ data.attendance }}%</span>
-                    </div>
-                  </TableCell>
-                  <TableCell>{{ data.late }}</TableCell>
-                  <TableCell>{{ data.absent }}</TableCell>
-                  <TableCell>
-                    <div v-if="index > 0" class="flex items-center gap-1">
-                      <component 
-                        :is="getTrendIcon(data.attendance, attendanceData[index-1].attendance)" 
-                        class="h-4 w-4"
-                        :class="getTrendColor(data.attendance, attendanceData[index-1].attendance)"
-                      />
-                      <span :class="getTrendColor(data.attendance, attendanceData[index-1].attendance)">
-                        {{ Math.abs(data.attendance - attendanceData[index-1].attendance) }}%
-                      </span>
-                    </div>
-                    <span v-else class="text-muted-foreground">-</span>
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      </TabsContent>
-      
-      <!-- Performance Tab -->
-      <TabsContent value="performance" class="space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Performance by Department</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Department</TableHead>
-                  <TableHead>Average Rating</TableHead>
-                  <TableHead>Goals Achieved</TableHead>
-                  <TableHead>Reviews Completed</TableHead>
-                  <TableHead>Performance Score</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow v-for="perf in filteredPerformanceData" :key="perf.department">
-                  <TableCell class="font-medium">{{ perf.department }}</TableCell>
-                  <TableCell>
-                    <div class="flex items-center gap-2">
-                      <Star class="h-4 w-4 text-yellow-500" />
-                      <span class="font-medium">{{ perf.averageRating }}/5</span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div class="flex items-center gap-2">
-                      <Progress :value="perf.goalsAchieved" class="w-16" />
-                      <span class="font-medium">{{ perf.goalsAchieved }}%</span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div class="flex items-center gap-2">
-                      <Progress :value="perf.reviewsCompleted" class="w-16" />
-                      <span class="font-medium">{{ perf.reviewsCompleted }}%</span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge :variant="perf.averageRating >= 4.0 ? 'default' : 
-                                   perf.averageRating >= 3.0 ? 'secondary' : 'destructive'">
-                      {{ perf.averageRating >= 4.0 ? 'Excellent' : 
-                         perf.averageRating >= 3.0 ? 'Good' : 'Needs Improvement' }}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      </TabsContent>
-      
-      <!-- Payroll Tab -->
+
       <TabsContent value="payroll" class="space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle>Payroll Analysis</CardTitle>
+            <CardTitle>6-Month Payroll Trends</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="h-80 flex items-center justify-center border rounded-lg bg-muted/20">
+              <div class="text-center text-muted-foreground">
+                <TrendingUp class="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>Payroll Trends Chart</p>
+                <p class="text-sm">Interactive chart would be displayed here</p>
+              </div>
+            </div>
+            
+            <div class="mt-6 grid grid-cols-3 gap-4">
+              <div class="p-4 bg-accent/50 rounded-lg">
+                <p class="text-sm text-muted-foreground">Average Monthly</p>
+                <p class="mt-1 font-semibold">$144,700</p>
+              </div>
+              <div class="p-4 bg-accent/50 rounded-lg">
+                <p class="text-sm text-muted-foreground">Overtime Ratio</p>
+                <p class="mt-1 font-semibold">11.3%</p>
+              </div>
+              <div class="p-4 bg-accent/50 rounded-lg">
+                <p class="text-sm text-muted-foreground">YoY Growth</p>
+                <p class="mt-1 font-semibold text-green-600">+8.5%</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="departments" class="space-y-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Department Cost Analysis</CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Department</TableHead>
-                  <TableHead>Total Payroll</TableHead>
-                  <TableHead>Average Salary</TableHead>
-                  <TableHead>Benefits Cost</TableHead>
+                  <TableHead>Employees</TableHead>
+                  <TableHead>Avg Hours/Week</TableHead>
+                  <TableHead>Total Cost</TableHead>
                   <TableHead>Cost per Employee</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                <TableRow v-for="payroll in filteredPayrollData" :key="payroll.department">
-                  <TableCell class="font-medium">{{ payroll.department }}</TableCell>
-                  <TableCell class="font-medium">${{ payroll.totalPayroll.toLocaleString() }}</TableCell>
-                  <TableCell>${{ payroll.averageSalary.toLocaleString() }}</TableCell>
-                  <TableCell>${{ payroll.benefits.toLocaleString() }}</TableCell>
-                  <TableCell>${{ Math.round((payroll.totalPayroll + payroll.benefits) / 10).toLocaleString() }}</TableCell>
+                <TableRow v-for="(dept, index) in departmentCostsData" :key="index">
+                  <TableCell>{{ dept.dept }}</TableCell>
+                  <TableCell>{{ dept.employees }}</TableCell>
+                  <TableCell>{{ dept.avgHours }}h</TableCell>
+                  <TableCell>${{ dept.totalCost.toLocaleString() }}</TableCell>
+                  <TableCell>
+                    ${{ Math.round(dept.totalCost / dept.employees).toLocaleString() }}
+                  </TableCell>
                 </TableRow>
               </TableBody>
             </Table>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Cost Distribution by Department</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="h-64 flex items-center justify-center border rounded-lg bg-muted/20">
+              <div class="text-center text-muted-foreground">
+                <TrendingUp class="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>Department Cost Chart</p>
+                <p class="text-sm">Bar chart would be displayed here</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </TabsContent>
-      
-      <!-- Turnover Tab -->
+
+      <TabsContent value="compliance" class="space-y-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Compliance Dashboard</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="space-y-4">
+              <div
+                v-for="(item, index) in complianceData"
+                :key="index"
+                :class="[
+                  'p-4 rounded-lg border',
+                  item.status === 'compliant' 
+                    ? 'bg-green-500/10 border-green-500/20' 
+                    : 'bg-yellow-500/10 border-yellow-500/20'
+                ]"
+              >
+                <div class="flex items-center justify-between">
+                  <div class="flex-1">
+                    <p class="font-medium">{{ item.metric }}</p>
+                    <p class="text-sm text-muted-foreground mt-1">
+                      Target: {{ item.target }} violations
+                    </p>
+                  </div>
+                  <div class="text-right flex items-center gap-4">
+                    <div>
+                      <p class="text-2xl font-semibold">{{ item.value }}</p>
+                      <p class="text-sm text-muted-foreground">Current</p>
+                    </div>
+                    <Badge
+                      :variant="item.status === 'compliant' ? 'default' : 'secondary'"
+                      :class="[
+                        item.status === 'compliant' 
+                          ? 'bg-green-500 hover:bg-green-600' 
+                          : 'bg-yellow-600 hover:bg-yellow-700'
+                      ]"
+                    >
+                      {{ item.status === 'compliant' ? 'Compliant' : 'Needs Review' }}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-6 p-4 bg-accent/50 rounded-lg">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm text-muted-foreground">Compliance Score</p>
+                  <p class="mt-1 text-xl font-semibold">84%</p>
+                </div>
+                <Button size="sm">View Details</Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
       <TabsContent value="turnover" class="space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle>Turnover Analysis</CardTitle>
+            <CardTitle>Employee Turnover Analysis</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Month</TableHead>
-                  <TableHead>New Hires</TableHead>
-                  <TableHead>Departures</TableHead>
-                  <TableHead>Net Change</TableHead>
-                  <TableHead>Trend</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow v-for="(data, index) in turnoverData" :key="data.month">
-                  <TableCell class="font-medium">{{ data.month }}</TableCell>
-                  <TableCell>
-                    <div class="flex items-center gap-2">
-                      <UserPlus class="h-4 w-4 text-green-600" />
-                      <span class="font-medium">{{ data.hires }}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div class="flex items-center gap-2">
-                      <UserMinus class="h-4 w-4 text-red-600" />
-                      <span class="font-medium">{{ data.departures }}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge :variant="data.net > 0 ? 'default' : data.net < 0 ? 'destructive' : 'secondary'">
-                      {{ data.net > 0 ? '+' : '' }}{{ data.net }}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <div v-if="index > 0" class="flex items-center gap-1">
-                      <component 
-                        :is="getTrendIcon(data.net, turnoverData[index-1].net)" 
-                        class="h-4 w-4"
-                        :class="getTrendColor(data.net, turnoverData[index-1].net)"
-                      />
-                      <span :class="getTrendColor(data.net, turnoverData[index-1].net)">
-                        {{ Math.abs(data.net - turnoverData[index-1].net) }}
-                      </span>
-                    </div>
-                    <span v-else class="text-muted-foreground">-</span>
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
+            <div class="h-64 flex items-center justify-center border rounded-lg bg-muted/20">
+              <div class="text-center text-muted-foreground">
+                <TrendingUp class="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>Turnover Analysis Chart</p>
+                <p class="text-sm">Line chart would be displayed here</p>
+              </div>
+            </div>
+
+            <div class="mt-6 grid grid-cols-3 gap-4">
+              <div class="p-4 bg-green-500/10 rounded-lg">
+                <p class="text-sm text-muted-foreground">Total Hires</p>
+                <p class="mt-1 font-semibold">19</p>
+              </div>
+              <div class="p-4 bg-red-500/10 rounded-lg">
+                <p class="text-sm text-muted-foreground">Total Exits</p>
+                <p class="mt-1 font-semibold">10</p>
+              </div>
+              <div class="p-4 bg-accent/50 rounded-lg">
+                <p class="text-sm text-muted-foreground">Turnover Rate</p>
+                <p class="mt-1 font-semibold">9.2%</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="labor" class="space-y-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Daily Labor Distribution</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="h-80 flex items-center justify-center border rounded-lg bg-muted/20">
+              <div class="text-center text-muted-foreground">
+                <TrendingUp class="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>Labor Distribution Chart</p>
+                <p class="text-sm">Area chart would be displayed here</p>
+              </div>
+            </div>
+
+            <div class="mt-6 grid grid-cols-3 gap-4">
+              <div class="p-4 bg-accent/50 rounded-lg">
+                <p class="text-sm text-muted-foreground">Peak Hours</p>
+                <p class="mt-1 font-semibold">10 AM - 2 PM</p>
+              </div>
+              <div class="p-4 bg-accent/50 rounded-lg">
+                <p class="text-sm text-muted-foreground">Peak Employees</p>
+                <p class="mt-1 font-semibold">95 people</p>
+              </div>
+              <div class="p-4 bg-accent/50 rounded-lg">
+                <p class="text-sm text-muted-foreground">Avg Active</p>
+                <p class="mt-1 font-semibold">68 people</p>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </TabsContent>
     </Tabs>
   </div>
 </template>
+
+<style scoped>
+.chart-container {
+  @apply w-full;
+}
+
+.chart {
+  @apply w-full h-full;
+}
+
+.bar {
+  @apply transition-all duration-200 hover:opacity-80;
+}
+
+.line {
+  @apply stroke-2;
+}
+
+.dot {
+  @apply transition-all duration-200;
+}
+
+.dot:hover {
+  r: 6;
+}
+
+.chart-label {
+  @apply text-xs fill-muted-foreground;
+}
+</style>

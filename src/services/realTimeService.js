@@ -1,6 +1,7 @@
 import { API_CONFIG } from '../config/api.js'
 import { getMobileApiConfig, isCordovaApp } from '../config/mobile.js'
 import authManager from './authService.js'
+import apiService from './apiService.js'
 
 /**
  * REAL-TIME API SERVICE
@@ -39,8 +40,8 @@ class RealTimeService {
 
       console.log('🔌 Connecting to real-time server...')
       
-      // Get authentication token
-      const authToken = authManager.jwtToken
+      // Get authentication token from API service
+      const authToken = apiService.getJwtToken()
       if (!authToken) {
         throw new Error('No authentication token available')
       }

@@ -13,8 +13,8 @@ export const MOBILE_CONFIG = {
   
   // Fallback configuration for web development
   WEB_API: {
-    BASE_URL: 'http://localhost:4000/api',
-    WS_URL: 'ws://localhost:4000/socket'
+    BASE_URL: 'https://batman-api-a20b3a37aa3c.herokuapp.com/api',
+    WS_URL: 'ws://batman-api-a20b3a37aa3c.herokuapp.com/socket'
   }
 };
 

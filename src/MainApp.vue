@@ -36,6 +36,7 @@ import DashboardLayout from './components/DashboardLayout.vue';
 import EmployeeDashboard from './components/dashboards/EmployeeDashboard.vue';
 import ManagerDashboard from './components/dashboards/ManagerDashboard.vue';
 import AdminDashboard from './components/dashboards/AdminDashboard.vue';
+import HRDashboard from './components/dashboards/HRDashboard.vue';
 import ProfileDialog from './components/dialogs/ProfileDialog.vue';
 
 // Import HR side pages
@@ -54,6 +55,7 @@ export default {
     EmployeeDashboard,
     ManagerDashboard,
     AdminDashboard,
+    HRDashboard,
     ProfileDialog,
     // HR side pages
     EmployeeManagement,

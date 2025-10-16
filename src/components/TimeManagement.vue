@@ -43,6 +43,8 @@ import {
   Calendar,
   Filter,
   Search,
+  Play,
+  Square,
 } from 'lucide-vue-next';
 import { useToast } from './ui/toast/use-toast.js';
 import { apiService } from '../services/apiService.js';
@@ -65,6 +67,14 @@ const newEntry = ref({
 const timeEntries = ref([]);
 const isLoading = ref(false);
 const loadError = ref(null);
+const isProcessingClock = ref(false);
+
+// Clock status for real-time display
+const clockStatus = ref({
+  isClockedIn: false,
+  clockInTime: null,
+  elapsedTime: 0
+});
 
 // Helper to format ISO datetimes to 'YYYY-MM-DD HH:MM:SS'
 const formatIsoToLocal = (input) => {
@@ -155,15 +165,159 @@ const loadEntries = async () => {
   }
 };
 
+// Load current clock status
+const loadClockStatus = async () => {
+  try {
+    const status = await apiService.getClockStatus();
+    if (status && status.data) {
+      clockStatus.value.isClockedIn = status.data.is_clocked_in || false;
+      if (status.data.current_entry && status.data.current_entry.clock_in) {
+        clockStatus.value.clockInTime = new Date(status.data.current_entry.clock_in);
+        clockStatus.value.elapsedTime = Math.floor((Date.now() - clockStatus.value.clockInTime.getTime()) / 1000);
+      }
+    }
+  } catch (error) {
+    // Clock status not available, assume clocked out
+    clockStatus.value.isClockedIn = false;
+    clockStatus.value.clockInTime = null;
+    clockStatus.value.elapsedTime = 0;
+  }
+};
+
 // Refresh when clock changes
-const onClockChanged = () => loadEntries();
+const onClockChanged = () => {
+  loadEntries();
+  loadClockStatus().then(() => {
+    // Start or stop timer based on clock status
+    if (clockStatus.value.isClockedIn) {
+      startElapsedTimer();
+    } else {
+      stopElapsedTimer();
+    }
+  });
+};
+
+// Real-time timer for elapsed time
+let elapsedTimer = null;
+
 onMounted(() => {
   loadEntries();
+  loadClockStatus();
   window.addEventListener('clock-changed', onClockChanged);
+  
+  // Start elapsed time timer if clocked in
+  if (clockStatus.value.isClockedIn) {
+    startElapsedTimer();
+  }
 });
+
 onUnmounted(() => {
   try { window.removeEventListener('clock-changed', onClockChanged); } catch (e) {}
+  if (elapsedTimer) {
+    clearInterval(elapsedTimer);
+  }
 });
+
+const startElapsedTimer = () => {
+  if (elapsedTimer) clearInterval(elapsedTimer);
+  elapsedTimer = setInterval(() => {
+    if (clockStatus.value.isClockedIn && clockStatus.value.clockInTime) {
+      clockStatus.value.elapsedTime = Math.floor((Date.now() - clockStatus.value.clockInTime.getTime()) / 1000);
+    }
+  }, 1000);
+};
+
+const stopElapsedTimer = () => {
+  if (elapsedTimer) {
+    clearInterval(elapsedTimer);
+    elapsedTimer = null;
+  }
+};
+
+// Clock in/out handlers
+const handleClockIn = async () => {
+  if (isProcessingClock.value) return;
+  isProcessingClock.value = true;
+  
+  try {
+    const clockInPayload = {
+      work_location: 'WFO',
+      notes: 'Clock in from Time Management page'
+    };
+
+    // Try to get location
+    try {
+      const locationData = await window.navigator.geolocation?.getCurrentPosition();
+      if (locationData) {
+        clockInPayload.latitude = locationData.coords.latitude;
+        clockInPayload.longitude = locationData.coords.longitude;
+      }
+    } catch (locationError) {
+      // Location not available, continue without it
+    }
+
+    const result = await apiService.clockIn(clockInPayload);
+    
+    if (result && result.data) {
+      toast({
+        title: 'Success',
+        description: 'Clocked in successfully',
+      });
+      
+      // Dispatch clock-changed event to sync with other components
+      window.dispatchEvent(new CustomEvent('clock-changed', { 
+        detail: { status: 'clocked-in', entryId: result.data.id } 
+      }));
+    }
+  } catch (err) {
+    console.error('Clock in failed:', err);
+    toast({
+      title: 'Error',
+      description: 'Failed to clock in. Please try again.',
+      variant: 'destructive',
+    });
+  } finally {
+    isProcessingClock.value = false;
+  }
+};
+
+const handleClockOut = async () => {
+  if (isProcessingClock.value) return;
+  isProcessingClock.value = true;
+  
+  try {
+    const clockOutPayload = {
+      notes: 'Clock out from Time Management page'
+    };
+
+    const result = await apiService.clockOut(clockOutPayload);
+    
+    if (result && result.data) {
+      toast({
+        title: 'Success',
+        description: 'Clocked out successfully',
+      });
+      
+      // Dispatch clock-changed event to sync with other components
+      window.dispatchEvent(new CustomEvent('clock-changed', { 
+        detail: { 
+          status: 'clocked-out', 
+          entryId: result.data.id,
+          totalHours: result.data.total_hours 
+        } 
+      }));
+    }
+  } catch (err) {
+    console.error('Clock out failed:', err);
+    toast({
+      title: 'Error',
+      description: 'Failed to clock out. Please try again.',
+      variant: 'destructive',
+    });
+  } finally {
+    isProcessingClock.value = false;
+  }
+};
 
 const calculateHours = (startTime, endTime) => {
   if (!startTime || !endTime) return '0';
@@ -171,6 +325,15 @@ const calculateHours = (startTime, endTime) => {
   const end = new Date(`2000-01-01T${endTime}`);
   const diff = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
   return diff.toFixed(2);
+};
+
+const formatElapsedTime = (seconds) => {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  return `${hours.toString().padStart(2, '0')}:${minutes
+    .toString()
+    .padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 };
 
 const handleSubmitEntry = () => {
@@ -304,6 +467,65 @@ const stats = computed(() => ({
         </CardContent>
       </Card>
     </div>
+
+    <!-- Current Clock Status -->
+    <Card v-if="clockStatus.isClockedIn" class="border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950">
+      <CardContent class="pt-6">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+            <div>
+              <p class="font-semibold text-green-800 dark:text-green-200">Currently Clocked In</p>
+              <p class="text-sm text-green-600 dark:text-green-400">
+                Started: {{ clockStatus.clockInTime ? clockStatus.clockInTime.toLocaleTimeString() : 'Unknown' }}
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center gap-4">
+            <div class="text-right">
+              <p class="text-2xl font-bold text-green-800 dark:text-green-200">
+                {{ formatElapsedTime(clockStatus.elapsedTime) }}
+              </p>
+              <p class="text-sm text-green-600 dark:text-green-400">Time Elapsed</p>
+            </div>
+            <Button 
+              @click="handleClockOut" 
+              variant="destructive" 
+              class="gap-2"
+              :disabled="isProcessingClock"
+            >
+              <Square class="h-4 w-4" />
+              Clock Out
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+
+    <!-- Clock In Section -->
+    <Card v-else class="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950">
+      <CardContent class="pt-6">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-3 h-3 bg-gray-400 rounded-full"></div>
+            <div>
+              <p class="font-semibold text-blue-800 dark:text-blue-200">Currently Clocked Out</p>
+              <p class="text-sm text-blue-600 dark:text-blue-400">
+                Ready to start your work day
+              </p>
+            </div>
+          </div>
+          <Button 
+            @click="handleClockIn" 
+            class="gap-2 bg-green-500 hover:bg-green-600"
+            :disabled="isProcessingClock"
+          >
+            <Play class="h-4 w-4" />
+            Clock In
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
 
     <!-- Main Content -->
     <Tabs defaultValue="timesheet" class="w-full">

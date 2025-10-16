@@ -132,23 +132,116 @@
     </main>
 
     <!-- Mobile Bottom Navigation -->
-    <nav class="mobile-bottom-nav fixed bottom-0 left-0 right-0 z-30 bg-background border-t md:hidden">
-      <div class="flex items-center justify-around px-2 py-2">
+    <nav class="mobile-bottom-nav fixed bottom-0 left-0 right-0 z-30 bg-background/95 backdrop-blur-sm border-t md:hidden safe-area-inset-bottom">
+      <div class="flex items-center justify-around px-2 py-2 max-w-md mx-auto">
         <Button
           v-for="item in quickNavItems"
           :key="item.id"
-          :variant="currentView === item.id ? 'default' : 'ghost'"
+          :variant="currentView === item.id ? 'secondary' : 'ghost'"
           size="sm"
-          class="flex-col gap-1 h-12 min-w-0 flex-1"
+          class="flex-col gap-1 h-14 min-w-0 flex-1 rounded-lg transition-all duration-200"
+          :class="{
+            'scale-105 shadow-md': currentView === item.id,
+            'opacity-70': item.priority === 'low' && currentView !== item.id,
+            'border-l-2': currentView === item.id,
+            [`border-l-${currentConfig.color}-500`]: currentView === item.id
+          }"
           @click="handleNavigation(item.id)"
         >
-          <component :is="item.icon" class="h-4 w-4" />
-          <span class="text-xs truncate">{{ item.shortLabel || item.label }}</span>
+          <component :is="item.icon" class="h-4 w-4" :class="currentView === item.id ? `text-${currentConfig.color}-600` : ''" />
+          <span class="text-xs truncate font-medium">{{ item.shortLabel || item.label }}</span>
         </Button>
       </div>
     </nav>
   </div>
 </template>
+
+<style scoped>
+/* Mobile-specific enhancements */
+.mobile-bottom-nav {
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+}
+
+/* Safe area handling for mobile devices */
+.safe-area-inset-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Role-based color utilities */
+.border-l-blue-500 {
+  border-left-color: hsl(var(--blue));
+}
+
+.border-l-green-500 {
+  border-left-color: hsl(var(--green));
+}
+
+.border-l-purple-500 {
+  border-left-color: hsl(var(--purple));
+}
+
+.border-l-red-500 {
+  border-left-color: hsl(var(--red));
+}
+
+.text-blue-600 {
+  color: hsl(var(--blue));
+}
+
+.text-green-600 {
+  color: hsl(var(--green));
+}
+
+.text-purple-600 {
+  color: hsl(var(--purple));
+}
+
+.text-red-600 {
+  color: hsl(var(--red));
+}
+
+/* Mobile sidebar animations */
+.sidebar-transition {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Priority-based styling */
+.priority-high {
+  font-weight: 600;
+}
+
+.priority-medium {
+  font-weight: 500;
+}
+
+.priority-low {
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+/* Mobile-specific button enhancements */
+.mobile-nav-button {
+  min-height: 56px; /* Touch-friendly minimum */
+  touch-action: manipulation;
+}
+
+/* Backdrop blur support */
+.backdrop-blur-sm {
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* Enhanced mobile header */
+.mobile-header {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.dark .mobile-header {
+  background: rgba(0, 0, 0, 0.9);
+}
+</style>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
@@ -180,9 +273,19 @@ const internalNotifications = ref(props.notifications || 0);
 // Subscribe to real-time notifications for the current user when mounted
 const setupNotifications = async () => {
   try {
+    // Only setup notifications if user is authenticated
+    if (!authManager.isAuthenticated()) {
+      console.debug('User not authenticated, skipping real-time notifications setup');
+      return;
+    }
+
     const profile = await authManager.getUserProfile();
     const uid = profile?.id || profile?.user_id || null;
-    if (!uid) return;
+    if (!uid) {
+      console.debug('No user ID available, skipping real-time notifications setup');
+      return;
+    }
+    
     // Join notifications channel (no-op if server not available)
     try {
       await realTimeService.joinNotifications(uid);
@@ -212,36 +315,56 @@ const roleConfig = {
   employee: {
     title: "Employee Portal",
     icon: Clock,
+    color: "blue",
     menuItems: [
-      { icon: Home, label: "Dashboard", id: "dashboard", shortLabel: "Home" },
-      { icon: Clock, label: "Clock In/Out", id: "clock", shortLabel: "Clock" },
-      { icon: FileText, label: "Time Management", id: "timesheet", shortLabel: "Time" },
-      { icon: Calendar, label: "My Schedule", id: "schedule", shortLabel: "Schedule" },
-      { icon: TrendingUp, label: "My Reports", id: "reports", shortLabel: "Reports" },
-      { icon: HelpCircle, label: "Help Center", id: "help", shortLabel: "Help" },
+      { icon: Home, label: "Dashboard", id: "dashboard", shortLabel: "Home", priority: "high" },
+      { icon: Clock, label: "Clock In/Out", id: "clock", shortLabel: "Clock", priority: "high" },
+      { icon: FileText, label: "Time Management", id: "timesheet", shortLabel: "Time", priority: "medium" },
+      { icon: Calendar, label: "My Schedule", id: "schedule", shortLabel: "Schedule", priority: "medium" },
+      { icon: TrendingUp, label: "My Reports", id: "reports", shortLabel: "Reports", priority: "low" },
+      { icon: HelpCircle, label: "Help Center", id: "help", shortLabel: "Help", priority: "low" },
     ],
   },
   manager: {
     title: "Manager Portal",
     icon: Users,
+    color: "green",
     menuItems: [
-      { icon: Home, label: "Dashboard", id: "dashboard", shortLabel: "Home" },
-      { icon: Users, label: "Team Overview", id: "team", shortLabel: "Team" },
-      { icon: FileText, label: "Approvals", id: "approvals", shortLabel: "Approvals" },
-      { icon: TrendingUp, label: "Reports", id: "reports", shortLabel: "Reports" },
-      { icon: Bell, label: "Alerts", id: "alerts", shortLabel: "Alerts" },
-      { icon: HelpCircle, label: "Help Center", id: "help", shortLabel: "Help" },
+      { icon: Home, label: "Dashboard", id: "dashboard", shortLabel: "Home", priority: "high" },
+      { icon: Users, label: "Team Overview", id: "team", shortLabel: "Team", priority: "high" },
+      { icon: FileText, label: "Approvals", id: "approvals", shortLabel: "Approvals", priority: "high" },
+      { icon: TrendingUp, label: "Reports", id: "reports", shortLabel: "Reports", priority: "medium" },
+      { icon: Bell, label: "Alerts", id: "alerts", shortLabel: "Alerts", priority: "medium" },
+      { icon: HelpCircle, label: "Help Center", id: "help", shortLabel: "Help", priority: "low" },
+    ],
+  },
+  hr: {
+    title: "HR Portal",
+    icon: Users,
+    color: "purple",
+    menuItems: [
+      { icon: Home, label: "Dashboard", id: "dashboard", shortLabel: "Home", priority: "high" },
+      { icon: Users, label: "Employee Management", id: "employees", shortLabel: "Staff", priority: "high" },
+      { icon: FileText, label: "Recruitment", id: "recruitment", shortLabel: "Hire", priority: "high" },
+      { icon: TrendingUp, label: "Performance", id: "performance", shortLabel: "Perf", priority: "medium" },
+      { icon: Calendar, label: "Payroll", id: "payroll", shortLabel: "Pay", priority: "medium" },
+      { icon: Shield, label: "HR Reports", id: "reports", shortLabel: "Reports", priority: "medium" },
+      { icon: Settings, label: "HR Settings", id: "settings", shortLabel: "Settings", priority: "low" },
+      { icon: HelpCircle, label: "Help Center", id: "help", shortLabel: "Help", priority: "low" },
     ],
   },
   admin: {
     title: "Admin Portal",
     icon: Shield,
+    color: "red",
     menuItems: [
-      { icon: Home, label: "Dashboard", id: "dashboard", shortLabel: "Home" },
-      { icon: Users, label: "Employee Management", id: "employees", shortLabel: "Staff" },
-      { icon: TrendingUp, label: "Analytics", id: "analytics", shortLabel: "Analytics" },
-      { icon: Settings, label: "Settings", id: "settings", shortLabel: "Settings" },
-      { icon: HelpCircle, label: "Help Center", id: "help", shortLabel: "Help" },
+      { icon: Home, label: "Dashboard", id: "dashboard", shortLabel: "Home", priority: "high" },
+      { icon: Users, label: "Employee Management", id: "employees", shortLabel: "Staff", priority: "high" },
+      { icon: TrendingUp, label: "Analytics", id: "analytics", shortLabel: "Analytics", priority: "high" },
+      { icon: Settings, label: "Settings", id: "settings", shortLabel: "Settings", priority: "high" },
+      { icon: Clock, label: "Kiosk Mode", id: "kiosk", shortLabel: "Kiosk", priority: "medium" },
+      { icon: FileText, label: "Reports", id: "reports", shortLabel: "Reports", priority: "medium" },
+      { icon: HelpCircle, label: "Help Center", id: "help", shortLabel: "Help", priority: "low" },
     ],
   },
 };
@@ -252,10 +375,27 @@ watch(() => props.notifications, (v) => {
   internalNotifications.value = v || 0;
 });
 
-// Quick navigation items for bottom nav (max 5 items)
+// Quick navigation items for bottom nav (prioritized, max 5 items)
 const quickNavItems = computed(() => {
-  const items = currentConfig.value.menuItems.slice(0, 5);
-  return items;
+  const items = currentConfig.value.menuItems;
+  
+  // Prioritize high priority items first, then medium, then low
+  const highPriority = items.filter(item => item.priority === 'high');
+  const mediumPriority = items.filter(item => item.priority === 'medium');
+  const lowPriority = items.filter(item => item.priority === 'low');
+  
+  // Take up to 5 items, prioritizing high priority items
+  let result = [...highPriority];
+  
+  if (result.length < 5) {
+    result = [...result, ...mediumPriority.slice(0, 5 - result.length)];
+  }
+  
+  if (result.length < 5) {
+    result = [...result, ...lowPriority.slice(0, 5 - result.length)];
+  }
+  
+  return result.slice(0, 5);
 });
 
 const toggleSidebar = () => {

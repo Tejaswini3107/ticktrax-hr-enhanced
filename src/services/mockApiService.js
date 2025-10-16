@@ -2,48 +2,33 @@
 import apiService from './apiService.js';
 
 export const mockApiService = {
-  // Login: prefer real API signIn, fallback to a deterministic mock (email-only)
+  // Login: Mock authentication service (no real API calls)
   async login(credentials) {
     // Require email-based login in the UI now
     if (!credentials || !credentials.email || !credentials.password) {
       throw new Error('Email and password are required');
     }
 
-    try {
-      const result = await apiService.signIn({ email: credentials.email, password: credentials.password });
-      // Normalize API response (support different backend shapes)
-      if (result && (result.data || result.user || result.email)) {
-        const data = result.data || result;
-        const attrs = data.attributes || data.user || data;
-        const user = {
-          id: data.id || attrs.id || attrs.user_id || null,
-          email: attrs.email || attrs.email,
-          first_name: attrs.first_name || attrs.firstName || '',
-          last_name: attrs.last_name || attrs.lastName || '',
-          name: attrs.name || `${attrs.first_name || ''} ${attrs.last_name || ''}`.trim() || attrs.email,
-          role: (attrs.role || 'employee').toLowerCase()
-        };
-        const token = result?.meta?.token || result?.token || null;
-        return { success: true, data: { user }, token };
-      }
-      throw new Error('Invalid API response');
-    } catch (err) {
-      // Fallback mock behavior (deterministic from email)
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const email = credentials.email;
-      const name = email.split('@')[0].replace(/[_\.\-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-      const role = email.includes('admin') ? 'admin' : email.includes('manager') ? 'manager' : 'employee';
-      return {
-        success: true,
-        data: {
-          user: { id: 1, email, name, role }
-        },
-        token: 'mock-jwt-token'
-      };
-    }
+    // Mock authentication behavior (deterministic from email)
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const email = credentials.email;
+    const name = email.split('@')[0].replace(/[_\.\-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const role = email.includes('admin') ? 'admin' : 
+                 email.includes('manager') ? 'manager' : 
+                 email.includes('hr') ? 'hr' : 'employee';
+    
+    // Mock API role detection
+    
+    return {
+      success: true,
+      data: {
+        user: { id: 1, email, name, role }
+      },
+      token: 'mock-jwt-token'
+    };
   },
 
-  // Logout: prefer real API signOut
+  // Logout: use signOut endpoint
   async logout() {
     try {
       const res = await apiService.signOut();

@@ -30,7 +30,14 @@ class GothamApiService {
 
   isAuthenticated() {
     this.initializeTokens();
-    return Boolean(this.jwtToken);
+    const hasToken = Boolean(this.jwtToken);
+    // Authentication check
+    return hasToken;
+  }
+
+  getJwtToken() {
+    this.initializeTokens();
+    return this.jwtToken;
   }
 
   // Generic request method with auth headers and empty-state normalization
@@ -70,7 +77,7 @@ class GothamApiService {
         } catch (_) {}
       }
 
-      console.log(`API Request: ${config.method || 'GET'} ${url}`);
+      // API Request
 
       const response = await fetch(url, config);
 
@@ -80,7 +87,7 @@ class GothamApiService {
         if (import.meta.env && import.meta.env.DEV) {
           console.debug('API Response debug', { status: response.status, contentType: respContentType, url });
         }
-        console.log(`API Response status: ${response.status} content-type: ${respContentType}`);
+        // API Response status
       } catch (e) {
         // ignore logging errors
       }
@@ -141,17 +148,17 @@ class GothamApiService {
         if (!text) return {};
         try {
           const parsed = JSON.parse(text);
-          console.log('API Response:', parsed);
+          // API Response parsed
           return parsed;
         } catch (_) {
           // Return as raw text when backend doesn't send JSON
-          console.log('API Response (text):', text);
+          // API Response as text
           return { message: text };
         }
       }
       
       const data = await response.json();
-      console.log('API Response:', data);
+      // API Response data
 
       // Normalize empty collections to [] for UI "No data" states
       if (data == null) return [];
@@ -340,6 +347,760 @@ class GothamApiService {
     const qs = new URLSearchParams(query).toString();
     const base = API_CONFIG.ENDPOINTS.INTEGRATIONS.LIST;
     return await this.request(qs ? `${base}?${qs}` : base);
+  }
+
+  // ==================== COMPREHENSIVE API METHODS ====================
+  // Based on Gotham Time Manager API Documentation
+
+  // Authentication Methods
+  async getCurrentUser() {
+    return await this.request(API_CONFIG.ENDPOINTS.AUTH.GET_CURRENT_USER);
+  }
+
+  // User Management Methods
+  async deleteUser(userId) {
+    const endpoint = API_CONFIG.ENDPOINTS.USERS.BY_ID.replace(':id', String(userId));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  async updateUserRole(userId, roleId) {
+    const endpoint = API_CONFIG.ENDPOINTS.USERS.UPDATE_ROLE.replace(':id', String(userId));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify({ user_id: userId, role_id: roleId })
+    });
+  }
+
+  async getUserProfile() {
+    return await this.request(API_CONFIG.ENDPOINTS.USERS.PROFILE);
+  }
+
+  async updateUserProfile(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.USERS.PROFILE, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async changePassword(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.USERS.PASSWORD, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getUserDashboard() {
+    return await this.request(API_CONFIG.ENDPOINTS.USERS.DASHBOARD);
+  }
+
+  // Time Tracking Methods
+  async clockIn(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.TIME_TRACKING.CLOCK_IN, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async clockOut(payload = {}) {
+    return await this.request(API_CONFIG.ENDPOINTS.TIME_TRACKING.CLOCK_OUT, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getClockStatus() {
+    return await this.request(API_CONFIG.ENDPOINTS.TIME_TRACKING.STATUS);
+  }
+
+  async getTimeEntries(query = {}) {
+    const qs = new URLSearchParams(query).toString();
+    const base = API_CONFIG.ENDPOINTS.TIME_TRACKING.ENTRIES;
+    return await this.request(qs ? `${base}?${qs}` : base);
+  }
+
+  async createManualEntry(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.TIME_TRACKING.MANUAL_ENTRY, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async updateTimeEntry(entryId, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.TIME_TRACKING.UPDATE_ENTRY.replace(':id', String(entryId));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteTimeEntry(entryId) {
+    const endpoint = API_CONFIG.ENDPOINTS.TIME_TRACKING.DELETE_ENTRY.replace(':id', String(entryId));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Break Management Methods
+  async startBreak() {
+    return await this.request(API_CONFIG.ENDPOINTS.BREAKS.START, {
+      method: 'POST'
+    });
+  }
+
+  async endBreak() {
+    return await this.request(API_CONFIG.ENDPOINTS.BREAKS.END, {
+      method: 'POST'
+    });
+  }
+
+  async getBreakStatus() {
+    return await this.request(API_CONFIG.ENDPOINTS.BREAKS.STATUS);
+  }
+
+  async getBreakHistory() {
+    return await this.request(API_CONFIG.ENDPOINTS.BREAKS.HISTORY);
+  }
+
+  async getBreakSummary() {
+    return await this.request(API_CONFIG.ENDPOINTS.BREAKS.SUMMARY);
+  }
+
+  // Working Times Methods
+  async getWorkingTimes() {
+    return await this.request(API_CONFIG.ENDPOINTS.WORKING_TIMES.LIST);
+  }
+
+  async createWorkingTime(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.WORKING_TIMES.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getWorkingTimeById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.WORKING_TIMES.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateWorkingTime(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.WORKING_TIMES.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteWorkingTime(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.WORKING_TIMES.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Task Management Methods (Enhanced)
+  async getTaskById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateTask(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify({ task: payload })
+    });
+  }
+
+  async deleteTask(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  async assignTaskToUser(taskId, userId) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.ASSIGN_USER
+      .replace(':taskid', String(taskId))
+      .replace(':userid', String(userId));
+    return await this.request(endpoint, { method: 'POST' });
+  }
+
+  async removeTaskFromUser(taskId, userId) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.REMOVE_USER
+      .replace(':taskid', String(taskId))
+      .replace(':userid', String(userId));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Task Assignments
+  async getTaskAssignments() {
+    return await this.request(API_CONFIG.ENDPOINTS.TASKS.ASSIGNMENTS);
+  }
+
+  async createTaskAssignment(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.TASKS.ASSIGNMENTS, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getTaskAssignmentById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.ASSIGNMENT_BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateTaskAssignment(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.ASSIGNMENT_BY_ID.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteTaskAssignment(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.ASSIGNMENT_BY_ID.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Task Skills
+  async getTaskSkills() {
+    return await this.request(API_CONFIG.ENDPOINTS.TASKS.SKILLS);
+  }
+
+  async createTaskSkill(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.TASKS.SKILLS, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getTaskSkillById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.SKILL_BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateTaskSkill(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.SKILL_BY_ID.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteTaskSkill(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.SKILL_BY_ID.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  async updateTaskSkill(taskId, skillId, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.UPDATE_SKILL
+      .replace(':taskid', String(taskId))
+      .replace(':skillid', String(skillId));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  // Approval Methods
+  async getPendingApprovals(query = {}) {
+    const qs = new URLSearchParams(query).toString();
+    const base = API_CONFIG.ENDPOINTS.APPROVALS.PENDING;
+    return await this.request(qs ? `${base}?${qs}` : base);
+  }
+
+  async approveTimeEntry(id, payload = {}) {
+    const endpoint = API_CONFIG.ENDPOINTS.APPROVALS.APPROVE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async rejectTimeEntry(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.APPROVALS.REJECT.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async bulkApprove(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.APPROVALS.BULK_APPROVE, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getApprovalHistory() {
+    return await this.request(API_CONFIG.ENDPOINTS.APPROVALS.HISTORY);
+  }
+
+
+  // Reports Methods
+  async getTimesheetReport(query = {}) {
+    const qs = new URLSearchParams(query).toString();
+    const base = API_CONFIG.ENDPOINTS.REPORTS.TIMESHEET;
+    return await this.request(qs ? `${base}?${qs}` : base);
+  }
+
+  async getAttendanceReport(query = {}) {
+    const qs = new URLSearchParams(query).toString();
+    const base = API_CONFIG.ENDPOINTS.REPORTS.ATTENDANCE;
+    return await this.request(qs ? `${base}?${qs}` : base);
+  }
+
+  async getPayrollReport(query = {}) {
+    const qs = new URLSearchParams(query).toString();
+    const base = API_CONFIG.ENDPOINTS.REPORTS.PAYROLL;
+    return await this.request(qs ? `${base}?${qs}` : base);
+  }
+
+  async getOvertimeReport(query = {}) {
+    const qs = new URLSearchParams(query).toString();
+    const base = API_CONFIG.ENDPOINTS.REPORTS.OVERTIME;
+    return await this.request(qs ? `${base}?${qs}` : base);
+  }
+
+  // Settings Methods
+  async getProfileSettings() {
+    return await this.request(API_CONFIG.ENDPOINTS.SETTINGS.PROFILE);
+  }
+
+  async updateProfileSettings(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.SETTINGS.PROFILE, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getNotificationPreferences() {
+    return await this.request(API_CONFIG.ENDPOINTS.SETTINGS.NOTIFICATIONS);
+  }
+
+  async updateNotificationPreferences(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.SETTINGS.NOTIFICATIONS, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getWorkPreferences() {
+    return await this.request(API_CONFIG.ENDPOINTS.SETTINGS.WORK_PREFERENCES);
+  }
+
+  async updateWorkPreferences(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.SETTINGS.WORK_PREFERENCES, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  // Payroll Methods
+  async getPayrollSummary(query = {}) {
+    const qs = new URLSearchParams(query).toString();
+    const base = API_CONFIG.ENDPOINTS.PAYROLL.SUMMARY;
+    return await this.request(qs ? `${base}?${qs}` : base);
+  }
+
+
+  // Compliance Methods
+  async getComplianceIssues() {
+    const endpoint = API_CONFIG.ENDPOINTS.COMPLIANCE.ISSUES;
+    return await this.request(endpoint);
+  }
+
+  // Labor Methods
+  async getLaborDistribution() {
+    const endpoint = API_CONFIG.ENDPOINTS.LABOR.DISTRIBUTION;
+    return await this.request(endpoint);
+  }
+
+  // Reports Methods
+  async getTurnoverReport(query = {}) {
+    const endpoint = API_CONFIG.ENDPOINTS.REPORTS.TURNOVER;
+    const queryString = new URLSearchParams(query).toString();
+    const fullEndpoint = queryString ? `${endpoint}?${queryString}` : endpoint;
+    return await this.request(fullEndpoint);
+  }
+
+  async getPayrollHistory() {
+    return await this.request(API_CONFIG.ENDPOINTS.PAYROLL.HISTORY);
+  }
+
+  async generatePayroll(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.PAYROLL.GENERATE, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getPayRates() {
+    return await this.request(API_CONFIG.ENDPOINTS.PAYROLL.RATES);
+  }
+
+  async updatePayRates(userId, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.PAYROLL.UPDATE_RATES.replace(':user_id', String(userId));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  // Notifications Methods
+  async getNotifications() {
+    return await this.request(API_CONFIG.ENDPOINTS.NOTIFICATIONS.LIST);
+  }
+
+  async getUnreadNotificationCount() {
+    return await this.request(API_CONFIG.ENDPOINTS.NOTIFICATIONS.UNREAD_COUNT);
+  }
+
+  async markNotificationAsRead(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.NOTIFICATIONS.MARK_READ.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'PUT' });
+  }
+
+  async markAllNotificationsAsRead() {
+    return await this.request(API_CONFIG.ENDPOINTS.NOTIFICATIONS.MARK_ALL_READ, {
+      method: 'PUT'
+    });
+  }
+
+  async deleteNotification(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.NOTIFICATIONS.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  async updateNotificationPreferences(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.NOTIFICATIONS.PREFERENCES, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  // Teams Methods
+  async getTeams() {
+    return await this.request(API_CONFIG.ENDPOINTS.TEAMS.LIST);
+  }
+
+  async listTeams() {
+    return await this.getTeams(); // Alias for consistency with component usage
+  }
+
+  async createTeam(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.TEAMS.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getTeamById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.TEAMS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateTeam(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.TEAMS.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteTeam(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.TEAMS.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Projects Methods
+  async getProjects() {
+    return await this.request(API_CONFIG.ENDPOINTS.PROJECTS.LIST);
+  }
+
+  async createProject(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.PROJECTS.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getProjectById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.PROJECTS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateProject(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.PROJECTS.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteProject(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.PROJECTS.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Skills Methods (Enhanced)
+  async getSkillById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.SKILLS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateSkill(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.SKILLS.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteSkill(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.SKILLS.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // User Skills Methods
+  async getUserSkills() {
+    return await this.request(API_CONFIG.ENDPOINTS.USER_SKILLS.LIST);
+  }
+
+  async createUserSkill(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.USER_SKILLS.LIST, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getUserSkillById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.USER_SKILLS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateUserSkill(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.USER_SKILLS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteUserSkill(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.USER_SKILLS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  async assignSkillToUser(userId, skillId) {
+    const endpoint = API_CONFIG.ENDPOINTS.USER_SKILLS.ASSIGN
+      .replace(':userid', String(userId))
+      .replace(':skillid', String(skillId));
+    return await this.request(endpoint, { method: 'POST' });
+  }
+
+  async removeSkillFromUser(userId, skillId) {
+    const endpoint = API_CONFIG.ENDPOINTS.USER_SKILLS.REMOVE
+      .replace(':userid', String(userId))
+      .replace(':skillid', String(skillId));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Schedules Methods (Enhanced)
+  async getSchedules(params = {}) {
+    const endpoint = API_CONFIG.ENDPOINTS.SCHEDULES.LIST;
+    const queryString = new URLSearchParams(params).toString();
+    const fullEndpoint = queryString ? `${endpoint}?${queryString}` : endpoint;
+    return await this.request(fullEndpoint);
+  }
+
+  async createSchedule(payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.SCHEDULES.CREATE;
+    return await this.request(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getScheduleById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.SCHEDULES.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateSchedule(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.SCHEDULES.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteSchedule(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.SCHEDULES.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Shifts Methods
+  async getShifts() {
+    return await this.request(API_CONFIG.ENDPOINTS.SHIFTS.LIST);
+  }
+
+  async createShift(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.SHIFTS.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getShiftById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.SHIFTS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateShift(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.SHIFTS.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteShift(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.SHIFTS.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Leaves Methods
+  async getLeaves() {
+    return await this.request(API_CONFIG.ENDPOINTS.LEAVES.LIST);
+  }
+
+  async createLeave(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.LEAVES.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getLeaveById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.LEAVES.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateLeave(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.LEAVES.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteLeave(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.LEAVES.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Roles Methods
+  async getRoleById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.ROLES.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async deleteUserPermissions(userId) {
+    const endpoint = API_CONFIG.ENDPOINTS.PERMISSIONS.DELETE.replace(':user_id', String(userId));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Activities Methods
+  async getBillableActivities() {
+    return await this.request(API_CONFIG.ENDPOINTS.ACTIVITIES.BILLABLE);
+  }
+
+  // Unrecognized Works Methods
+  async getUnrecognizedWorks() {
+    return await this.request(API_CONFIG.ENDPOINTS.UNRECOGNIZED_WORKS.LIST);
+  }
+
+  async createUnrecognizedWork(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.UNRECOGNIZED_WORKS.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getUnrecognizedWorkById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.UNRECOGNIZED_WORKS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateUnrecognizedWork(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.UNRECOGNIZED_WORKS.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteUnrecognizedWork(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.UNRECOGNIZED_WORKS.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Compensation Logs Methods
+  async getCompensationLogs() {
+    return await this.request(API_CONFIG.ENDPOINTS.COMPENSATION_LOGS.LIST);
+  }
+
+  async createCompensationLog(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.COMPENSATION_LOGS.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getCompensationLogById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.COMPENSATION_LOGS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateCompensationLog(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.COMPENSATION_LOGS.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteCompensationLog(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.COMPENSATION_LOGS.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Integration Methods (Enhanced)
+  async createIntegration(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.INTEGRATION.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getIntegrationById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.INTEGRATION.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateIntegration(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.INTEGRATION.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteIntegration(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.INTEGRATION.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Mock API Service Fallback
+  async getMockResponse(endpoint, options = {}) {
+    // This would be implemented with mock data for development/testing
+    console.warn(`[API] Mock service fallback for ${endpoint}`);
+    throw new Error('Mock service not implemented');
   }
 }
 
