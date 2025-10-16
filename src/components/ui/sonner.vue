@@ -23,6 +23,7 @@ const props = defineProps({
 <template>
   <Sonner
     class="toaster group"
+    position="top-center"
     v-bind="props"
     :toast-options="{
       classes: {

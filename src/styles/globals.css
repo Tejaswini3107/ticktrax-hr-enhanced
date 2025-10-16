@@ -199,6 +199,40 @@ html {
   font-size: var(--font-size);
 }
 
+/* Ensure all dialogs and popups are centered */
+[data-radix-dialog-content] {
+  position: fixed !important;
+  left: 50% !important;
+  top: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  z-index: 50 !important;
+}
+
+/* Ensure dialog overlays cover the full screen */
+[data-radix-dialog-overlay] {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 40 !important;
+}
+
+/* Additional centering for any modal or popup */
+.modal-center,
+.popup-center,
+.dialog-center {
+  position: fixed !important;
+  left: 50% !important;
+  top: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  z-index: 50 !important;
+}
+
+/* Ensure all fixed positioned elements that should be centered are centered */
+.fixed.center {
+  left: 50% !important;
+  top: 50% !important;
+  transform: translate(-50%, -50%) !important;
+}
+
 /* React Day Picker styles */
 .rdp {
   --rdp-cell-size: 40px;
