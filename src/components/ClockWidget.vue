@@ -41,27 +41,37 @@ onUnmounted(() => {
   clearInterval(timer);
 });
 
-// Attempt to load server clock state separately on mount
+// Load clock status on mount using new API
 onMounted(async () => {
   try {
-    const res = await authManager.getCurrentUser();
-    const uid = res?.data?.id;
-    if (!uid) return;
-    const clockData = await apiService.getUserClock(uid);
-    const d = Array.isArray(clockData) ? clockData[0] : (clockData || {});
-    const s = d?.status || d?.state || (d?.clock_out ? 'clocked-out' : (d?.clock_in ? 'clocked-in' : null));
-    const ts = d?.clock_in || d?.clocked_in_at || d?.start_time || d?.timestamp || null;
-    if (s === 'clocked-in' || s === 'in' || s === 'active') {
-      status.value = 'clocked-in';
-      if (ts) {
-        const parsed = new Date(ts);
-        if (!isNaN(parsed.getTime())) clockedInTime.value = parsed;
+    if (!authManager.isAuthenticated()) {
+      console.log('🚀 User not authenticated, skipping clock status check');
+      return;
+    }
+    
+    const clockStatus = await apiService.getClockStatus();
+    if (clockStatus && clockStatus.data) {
+      if (clockStatus.data.is_clocked_in && clockStatus.data.current_entry) {
+        status.value = 'clocked-in';
+        const clockInTime = new Date(clockStatus.data.current_entry.clock_in);
+        if (!isNaN(clockInTime.getTime())) {
+          clockedInTime.value = clockInTime;
+          // Initialize elapsed time from server data
+          elapsedTime.value = Math.floor((Date.now() - clockInTime.getTime()) / 1000);
+        }
+        console.log('🕐 Clock status loaded:', clockStatus.data);
+      } else {
+        status.value = 'clocked-out';
+        clockedInTime.value = null;
+        elapsedTime.value = 0;
       }
-    } else {
-      status.value = 'clocked-out';
     }
   } catch (e) {
     console.debug('Could not fetch server clock state', e?.message || e);
+    // Fallback to clocked-out state
+    status.value = 'clocked-out';
+    clockedInTime.value = null;
+    elapsedTime.value = 0;
   }
   
   // Setup realtime listeners for live clock updates
@@ -87,23 +97,64 @@ onMounted(async () => {
   });
 });
 
-// Backend-backed clock in/out
+// Clock in using new time tracking API
 const clockIn = async (userId = null) => {
   if (isProcessing.value) return;
   isProcessing.value = true;
   try {
-    let uid = userId;
-    if (!uid) {
-      const res = await authManager.getCurrentUser();
-      uid = res?.data?.id;
+    // Prepare clock in payload with location data if available
+    const clockInPayload = {
+      work_location: 'WFO', // Default to Work From Office
+      notes: 'Clock in from web interface'
+    };
+
+    // Try to get location if LocationTracker is available
+    try {
+      const locationData = await window.navigator.geolocation?.getCurrentPosition();
+      if (locationData) {
+        clockInPayload.latitude = locationData.coords.latitude;
+        clockInPayload.longitude = locationData.coords.longitude;
+        clockInPayload.work_location = 'WFO'; // With GPS coordinates
+      }
+    } catch (locationError) {
+      console.log('Location not available, using default location');
     }
-    if (!uid) throw new Error('No user id');
-    await apiService.clockInOut(uid, 'clocked-in');
-  status.value = 'clocked-in';
-  clockedInTime.value = new Date();
-  try { window.dispatchEvent(new CustomEvent('clock-changed', { detail: { status: 'clocked-in', userId: uid } })); } catch (e) {}
+
+    const result = await apiService.clockIn(clockInPayload);
+    
+    if (result && result.data) {
+      status.value = 'clocked-in';
+      const clockInTime = new Date(result.data.clock_in);
+      if (!isNaN(clockInTime.getTime())) {
+        clockedInTime.value = clockInTime;
+        elapsedTime.value = Math.floor((Date.now() - clockInTime.getTime()) / 1000);
+      }
+      console.log('✅ Clocked in successfully:', result.data);
+      try { 
+        window.dispatchEvent(new CustomEvent('clock-changed', { 
+          detail: { status: 'clocked-in', entryId: result.data.id } 
+        })); 
+      } catch (e) {}
+    }
   } catch (err) {
-    console.error('Clock in failed', err);
+    console.error('Clock in failed:', err);
+    // Handle specific error cases
+    if (err.message && err.message.includes('already_clocked_in')) {
+      console.log('User is already clocked in');
+      // Try to get current status
+      try {
+        const status = await apiService.getClockStatus();
+        if (status?.data?.is_clocked_in) {
+          // Update UI to reflect current state
+          this.status.value = 'clocked-in';
+          if (status.data.current_entry?.clock_in) {
+            this.clockedInTime.value = new Date(status.data.current_entry.clock_in);
+          }
+        }
+      } catch (statusError) {
+        console.error('Could not get clock status:', statusError);
+      }
+    }
   } finally {
     isProcessing.value = false;
   }
@@ -113,19 +164,30 @@ const clockOut = async (userId = null) => {
   if (isProcessing.value) return;
   isProcessing.value = true;
   try {
-    let uid = userId;
-    if (!uid) {
-      const res = await authManager.getCurrentUser();
-      uid = res?.data?.id;
+    // Prepare clock out payload
+    const clockOutPayload = {
+      notes: 'Clock out from web interface'
+    };
+
+    const result = await apiService.clockOut(clockOutPayload);
+    
+    if (result && result.data) {
+      status.value = 'clocked-out';
+      clockedInTime.value = null;
+      elapsedTime.value = 0;
+      console.log('✅ Clocked out successfully:', result.data);
+      try { 
+        window.dispatchEvent(new CustomEvent('clock-changed', { 
+          detail: { 
+            status: 'clocked-out', 
+            entryId: result.data.id,
+            totalHours: result.data.total_hours 
+          } 
+        })); 
+      } catch (e) {}
     }
-    if (!uid) throw new Error('No user id');
-    await apiService.clockInOut(uid, 'clocked-out');
-  status.value = 'clocked-out';
-  clockedInTime.value = null;
-  elapsedTime.value = 0;
-  try { window.dispatchEvent(new CustomEvent('clock-changed', { detail: { status: 'clocked-out', userId: uid } })); } catch (e) {}
   } catch (err) {
-    console.error('Clock out failed', err);
+    console.error('Clock out failed:', err);
   } finally {
     isProcessing.value = false;
   }

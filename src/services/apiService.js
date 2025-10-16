@@ -1,403 +1,128 @@
-// Enhanced API Service with Advanced Features
-// Gotham Time Manager / Ticktrax API Integration
-// Includes: Caching, Retry Logic, Request Deduplication, Performance Monitoring
+// Gotham API Service - Real API integration aligned with Postman collection
+import { API_CONFIG } from '../config/api.js';
 
-import { API_CONFIG, replacePathParams, buildQueryString } from '../config/api.complete.js';
-import { mockApiService } from './mockApiService.js';
-
-class TicktraxApiService {
+class GothamApiService {
   constructor() {
-    this.baseURL = API_CONFIG.BASE_URL;
+    this.baseURL = API_CONFIG.BASE_URL || 'http://localhost:4000/api';
     this.jwtToken = null;
-    this.csrfToken = null;
-    
-    // 🚀 Performance & Caching
-    this.cache = new Map();
-    this.cacheTimeout = 5 * 60 * 1000; // 5 minutes default
-    this.requestQueue = new Map(); // Request deduplication
-    this.retryAttempts = API_CONFIG.RETRY_ATTEMPTS || 3;
-    this.retryDelay = 1000; // 1 second base delay
-    
-    // 📊 Performance Monitoring
-    this.metrics = {
-      totalRequests: 0,
-      successfulRequests: 0,
-      failedRequests: 0,
-      averageResponseTime: 0,
-      cacheHits: 0,
-      cacheMisses: 0
-    };
-    
-    // 🔄 Request Interceptors
-    this.requestInterceptors = [];
-    this.responseInterceptors = [];
-    
-    // 🎯 Rate Limiting
-    this.rateLimitConfig = {
-      maxRequests: 100,
-      timeWindow: 60000, // 1 minute
-      requests: []
-    };
+    this.xsrfToken = null;
   }
 
-  // ==================== TOKEN MANAGEMENT ====================
-  
+  // Token management
   initializeTokens() {
     this.jwtToken = localStorage.getItem('jwt_token');
-    this.csrfToken = localStorage.getItem('csrf_token');
+    this.xsrfToken = localStorage.getItem('xsrf_token');
   }
 
-  setTokens(jwtToken, csrfToken = null) {
+  setTokens(jwtToken, xsrfToken) {
     this.jwtToken = jwtToken;
-    this.csrfToken = csrfToken;
+    this.xsrfToken = xsrfToken;
     if (jwtToken) localStorage.setItem('jwt_token', jwtToken);
-    if (csrfToken) localStorage.setItem('csrf_token', csrfToken);
+    if (xsrfToken) localStorage.setItem('xsrf_token', xsrfToken);
   }
 
   clearTokens() {
     this.jwtToken = null;
-    this.csrfToken = null;
+    this.xsrfToken = null;
     localStorage.removeItem('jwt_token');
-    localStorage.removeItem('csrf_token');
-    localStorage.removeItem('user_data');
-    this.clearCache(); // Clear cache on logout
+    localStorage.removeItem('xsrf_token');
   }
 
   isAuthenticated() {
     this.initializeTokens();
-    return Boolean(this.jwtToken);
+    const hasToken = Boolean(this.jwtToken);
+    // Authentication check
+    return hasToken;
   }
 
-  // ==================== CACHING SYSTEM ====================
-  
-  /**
-   * Set cache entry with TTL
-   * @param {string} key - Cache key
-   * @param {any} data - Data to cache
-   * @param {number} ttl - Time to live in milliseconds
-   */
-  setCache(key, data, ttl = this.cacheTimeout) {
-    this.cache.set(key, {
-      data,
-      timestamp: Date.now(),
-      ttl
-    });
+  getJwtToken() {
+    this.initializeTokens();
+    return this.jwtToken;
   }
 
-  /**
-   * Get cache entry if valid
-   * @param {string} key - Cache key
-   * @returns {any|null} - Cached data or null
-   */
-  getCache(key) {
-    const entry = this.cache.get(key);
-    if (!entry) {
-      this.metrics.cacheMisses++;
-      return null;
-    }
-
-    const now = Date.now();
-    if (now - entry.timestamp > entry.ttl) {
-      this.cache.delete(key);
-      this.metrics.cacheMisses++;
-      return null;
-    }
-
-    this.metrics.cacheHits++;
-    return entry.data;
-  }
-
-  /**
-   * Clear all cache or specific key
-   * @param {string} key - Optional specific key to clear
-   */
-  clearCache(key = null) {
-    if (key) {
-      this.cache.delete(key);
-    } else {
-      this.cache.clear();
-    }
-  }
-
-  /**
-   * Generate cache key from endpoint and params
-   * @param {string} endpoint - API endpoint
-   * @param {Object} params - Query parameters
-   * @returns {string} - Cache key
-   */
-  generateCacheKey(endpoint, params = {}) {
-    const sortedParams = Object.keys(params)
-      .sort()
-      .map(key => `${key}=${params[key]}`)
-      .join('&');
-    return `${endpoint}${sortedParams ? `?${sortedParams}` : ''}`;
-  }
-
-  // ==================== REQUEST DEDUPLICATION ====================
-  
-  /**
-   * Check if request is already in progress
-   * @param {string} key - Request key
-   * @returns {Promise} - Existing request promise or null
-   */
-  getPendingRequest(key) {
-    return this.requestQueue.get(key) || null;
-  }
-
-  /**
-   * Add request to queue
-   * @param {string} key - Request key
-   * @param {Promise} promise - Request promise
-   */
-  addPendingRequest(key, promise) {
-    this.requestQueue.set(key, promise);
-    
-    // Clean up when request completes
-    promise.finally(() => {
-      this.requestQueue.delete(key);
-    });
-  }
-
-  // ==================== RATE LIMITING ====================
-  
-  /**
-   * Check if request is within rate limits
-   * @returns {boolean} - True if within limits
-   */
-  isWithinRateLimit() {
-    const now = Date.now();
-    const windowStart = now - this.rateLimitConfig.timeWindow;
-    
-    // Remove old requests outside time window
-    this.rateLimitConfig.requests = this.rateLimitConfig.requests.filter(
-      timestamp => timestamp > windowStart
-    );
-    
-    return this.rateLimitConfig.requests.length < this.rateLimitConfig.maxRequests;
-  }
-
-  /**
-   * Record request for rate limiting
-   */
-  recordRequest() {
-    this.rateLimitConfig.requests.push(Date.now());
-  }
-
-  // ==================== RETRY LOGIC ====================
-  
-  /**
-   * Calculate retry delay with exponential backoff
-   * @param {number} attempt - Current attempt number
-   * @returns {number} - Delay in milliseconds
-   */
-  calculateRetryDelay(attempt) {
-    return this.retryDelay * Math.pow(2, attempt - 1) + Math.random() * 1000;
-  }
-
-  /**
-   * Check if error is retryable
-   * @param {Error} error - Error to check
-   * @returns {boolean} - True if retryable
-   */
-  isRetryableError(error) {
-    const retryableStatuses = [408, 429, 500, 502, 503, 504];
-    const retryableMessages = ['timeout', 'network', 'connection'];
-    
-    if (error.status && retryableStatuses.includes(error.status)) {
-      return true;
-    }
-    
-    const message = error.message?.toLowerCase() || '';
-    return retryableMessages.some(keyword => message.includes(keyword));
-  }
-
-  // ==================== INTERCEPTORS ====================
-  
-  /**
-   * Add request interceptor
-   * @param {Function} interceptor - Interceptor function
-   */
-  addRequestInterceptor(interceptor) {
-    this.requestInterceptors.push(interceptor);
-  }
-
-  /**
-   * Add response interceptor
-   * @param {Function} interceptor - Interceptor function
-   */
-  addResponseInterceptor(interceptor) {
-    this.responseInterceptors.push(interceptor);
-  }
-
-  // ==================== PERFORMANCE MONITORING ====================
-  
-  /**
-   * Update performance metrics
-   * @param {number} responseTime - Response time in milliseconds
-   * @param {boolean} success - Whether request was successful
-   */
-  updateMetrics(responseTime, success) {
-    this.metrics.totalRequests++;
-    if (success) {
-      this.metrics.successfulRequests++;
-    } else {
-      this.metrics.failedRequests++;
-    }
-    
-    // Update average response time
-    const total = this.metrics.totalRequests;
-    this.metrics.averageResponseTime = 
-      (this.metrics.averageResponseTime * (total - 1) + responseTime) / total;
-  }
-
-  /**
-   * Get performance metrics
-   * @returns {Object} - Performance metrics
-   */
-  getMetrics() {
-    return {
-      ...this.metrics,
-      cacheHitRate: this.metrics.cacheHits / (this.metrics.cacheHits + this.metrics.cacheMisses) || 0,
-      successRate: this.metrics.successfulRequests / this.metrics.totalRequests || 0
-    };
-  }
-
-  // ==================== ENHANCED REQUEST METHOD ====================
-  
+  // Generic request method with auth headers and empty-state normalization
   async request(endpoint, options = {}) {
-    const startTime = Date.now();
-    const requestKey = this.generateCacheKey(endpoint, options.params);
-    
-    // Check for pending request (deduplication)
-    const pendingRequest = this.getPendingRequest(requestKey);
-    if (pendingRequest && options.method === 'GET') {
-      console.log(`[API] Deduplicating request: ${endpoint}`);
-      return await pendingRequest;
-    }
-
-    // Check cache for GET requests
-    if (options.method === 'GET' || !options.method) {
-      const cachedData = this.getCache(requestKey);
-      if (cachedData) {
-        console.log(`[API] Cache hit: ${endpoint}`);
-        return cachedData;
-      }
-    }
-
-    // Rate limiting check
-    if (!this.isWithinRateLimit()) {
-      throw new Error('Rate limit exceeded. Please try again later.');
-    }
-
-    // Record request for rate limiting
-    this.recordRequest();
-
-    // Apply request interceptors
-    let modifiedOptions = { ...options };
-    for (const interceptor of this.requestInterceptors) {
-      modifiedOptions = await interceptor(modifiedOptions, endpoint);
-    }
-
-    // Create request promise
-    const requestPromise = this.executeRequest(endpoint, modifiedOptions, startTime);
-    
-    // Add to pending requests for deduplication
-    if (options.method === 'GET' || !options.method) {
-      this.addPendingRequest(requestKey, requestPromise);
-    }
-
-    return await requestPromise;
-  }
-
-  async executeRequest(endpoint, options, startTime) {
-    let lastError;
-    
-    for (let attempt = 1; attempt <= this.retryAttempts; attempt++) {
-      try {
-        const result = await this.makeRequest(endpoint, options);
-        const responseTime = Date.now() - startTime;
-        
-        // Update metrics
-        this.updateMetrics(responseTime, true);
-        
-        // Cache successful GET requests
-        if ((options.method === 'GET' || !options.method) && result) {
-          this.setCache(this.generateCacheKey(endpoint, options.params), result);
-        }
-        
-        // Apply response interceptors
-        let finalResult = result;
-        for (const interceptor of this.responseInterceptors) {
-          finalResult = await interceptor(finalResult, endpoint, options);
-        }
-        
-        return finalResult;
-        
-      } catch (error) {
-        lastError = error;
-        const responseTime = Date.now() - startTime;
-        
-        // Update metrics
-        this.updateMetrics(responseTime, false);
-        
-        // Check if we should retry
-        if (attempt < this.retryAttempts && this.isRetryableError(error)) {
-          const delay = this.calculateRetryDelay(attempt);
-          console.log(`[API] Retry ${attempt}/${this.retryAttempts} in ${delay}ms for ${endpoint}`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
-        }
-        
-        throw error;
-      }
-    }
-    
-    throw lastError;
-  }
-
-  async makeRequest(endpoint, options = {}) {
     try {
       const url = `${this.baseURL}${endpoint}`;
       const headers = {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        ...options.headers
+          'Content-Type': 'application/json',
+        'Accept': 'application/json'
       };
 
-      // Add authentication token
       this.initializeTokens();
       if (this.jwtToken) {
         headers[API_CONFIG.HEADERS.AUTHORIZATION] = `Bearer ${this.jwtToken}`;
       }
-
-      // Add CSRF token for state-changing requests
       const method = (options.method || 'GET').toUpperCase();
-      if (this.csrfToken && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
-        headers[API_CONFIG.HEADERS.CSRF_TOKEN] = this.csrfToken;
+      // Send XSRF token only for state-changing requests to avoid CORS preflight rejections
+      // Avoid sending XSRF token for auth endpoints (sign_in/sign_up) because some backends
+      // do not allow custom CSRF headers on those endpoints and that triggers CORS preflight failures.
+      const isAuthEndpoint = endpoint.includes('/sign_in') || endpoint.includes('/sign_up');
+      if (this.xsrfToken && method !== 'GET' && !isAuthEndpoint) {
+        headers[API_CONFIG.HEADERS.CSRF_TOKEN] = this.xsrfToken;
       }
 
-      const config = {
-        method,
-        headers,
-        ...options
-      };
+      const config = { headers, ...options };
 
-      console.log(`[API] ${method} ${url}`);
-      
-      const response = await fetch(url, config);
-      
-      // Handle error responses
-      if (!response.ok) {
-        let message = `HTTP ${response.status}: ${response.statusText}`;
+      // Helpful debug information in dev: show method, url and whether auth/xsrf tokens are present
+      if (import.meta.env && import.meta.env.DEV) {
         try {
-          const errJson = await response.json();
-          message = errJson?.error || errJson?.message || 
-                   (Array.isArray(errJson?.errors) ? errJson.errors.join(', ') : message);
+          console.debug('API Request debug', {
+            method: config.method || 'GET',
+            url,
+            hasAuthorization: !!this.jwtToken,
+            hasXsrf: !!this.xsrfToken,
+            endpoint
+          });
         } catch (_) {}
-        
-        const error = new Error(message);
-        error.status = response.status;
-        throw error;
+      }
+
+      // API Request
+
+      const response = await fetch(url, config);
+
+      // Log response status and content-type for easier debugging when SPA HTML is returned
+      try {
+        const respContentType = response.headers.get('content-type') || '';
+        if (import.meta.env && import.meta.env.DEV) {
+          console.debug('API Response debug', { status: response.status, contentType: respContentType, url });
+        }
+        // API Response status
+      } catch (e) {
+        // ignore logging errors
+      }
+      
+      if (!response.ok) {
+        let message = `HTTP error! status: ${response.status}`;
+        let errBody = null;
+        try {
+          // Try to parse JSON body first; fall back to text when not JSON
+          const parsed = await response.clone().json().catch(() => null);
+          if (parsed) {
+            errBody = parsed;
+            const apiMsg = parsed?.error || parsed?.message || (Array.isArray(parsed?.errors) ? parsed.errors.join(', ') : null);
+            if (apiMsg) {
+              message = `${response.status} ${apiMsg}`;
+            } else {
+              message = `${response.status} ${JSON.stringify(parsed)}`;
+            }
+          } else {
+            const text = await response.clone().text().catch(() => null);
+            if (text) {
+              errBody = text;
+              message = `${response.status} ${text.toString().slice(0,400)}`;
+            }
+          }
+        } catch (_) {}
+        const err = new Error(message);
+        // Attach parsed body for upstream handlers to show detailed messages
+        err.response = errBody;
+        err.status = response.status;
+        // Log the backend error body for quicker debugging in the browser console (dev only)
+        try {
+          console.error('API Error body:', errBody);
+        } catch (_) {}
+        throw err;
       }
       
       // Handle 204 No Content
@@ -405,381 +130,533 @@ class TicktraxApiService {
         return { success: true };
       }
 
-      // Handle empty responses
       const contentType = response.headers.get('content-type') || '';
-      if (!contentType.includes('json')) {
+      const contentLength = Number(response.headers.get('content-length') || 0);
+
+      // If backend accidentally returns HTML (index.html) — likely a misconfigured base URL or proxy —
+      // fail fast with a useful error so devs can diagnose quickly.
+      if (contentType.toLowerCase().includes('html')) {
         const text = await response.text();
-        return text ? { message: text } : { success: true };
+        const snippet = (text || '').toString().slice(0, 400).replace(/\s+/g, ' ').trim();
+        console.error(`API Error: received HTML from ${url}. This usually means the request hit the SPA dev server or the proxy failed. Response snippet:`, snippet);
+        throw new Error(`Unexpected HTML response from API at ${url}. Check API base URL and dev proxy. Response snippet: ${snippet}`);
       }
 
-      const data = await response.json();
-      console.log('[API] Response:', data);
-
-      return data;
-    } catch (error) {
-      console.error('[API] Error:', error);
-      
-      // 🔄 Fallback to Mock Service for Development
-      if (error.message.includes('401') || error.message.includes('403') || error.message.includes('404') || error.message.includes('Failed to fetch')) {
-        console.log(`[API] Falling back to mock service for: ${endpoint}`);
+      // If not JSON or empty body, try text and return {}
+      if (!contentType.toLowerCase().includes('json') || contentLength === 0) {
+        const text = await response.text();
+        if (!text) return {};
         try {
-          return await this.getMockResponse(endpoint, options);
-        } catch (mockError) {
-          console.error(`[API] Mock service also failed:`, mockError);
+          const parsed = JSON.parse(text);
+          // API Response parsed
+          return parsed;
+        } catch (_) {
+          // Return as raw text when backend doesn't send JSON
+          // API Response as text
+          return { message: text };
         }
       }
       
+      const data = await response.json();
+      // API Response data
+
+      // Normalize empty collections to [] for UI "No data" states
+      if (data == null) return [];
+      if (Array.isArray(data)) return data;
+      if (data.data && Array.isArray(data.data)) return data.data;
+      if (data.items && Array.isArray(data.items)) return data.items;
+      return data;
+    } catch (error) {
+      console.error('API Error:', error);
       throw error;
     }
   }
 
-  // 🔄 Mock Service Fallback
-  async getMockResponse(endpoint, options = {}) {
-    console.log(`[API] Using mock response for: ${endpoint}`);
-    
-    // Map endpoints to mock methods
-    if (endpoint.includes('/auth/login')) {
-      return await mockApiService.login({ email: 'demo@example.com', password: 'password123' });
-    } else if (endpoint.includes('/auth/me')) {
-      return await mockApiService.getCurrentUser();
-    } else if (endpoint.includes('/users')) {
-      return await mockApiService.listUsers();
-    } else if (endpoint.includes('/time/status')) {
-      return await mockApiService.getTimeStatus();
-    } else if (endpoint.includes('/time/entries')) {
-      return await mockApiService.getTimeEntries();
-    } else if (endpoint.includes('/time/clock-in')) {
-      return await mockApiService.clockIn({ work_location: 'Office' });
-    } else if (endpoint.includes('/time/clock-out')) {
-      return await mockApiService.clockOut({ work_location: 'Office' });
-    } else if (endpoint.includes('/notifications')) {
-      return await mockApiService.getNotifications();
-    } else if (endpoint.includes('/analytics/overview')) {
-      return await mockApiService.getAnalyticsOverview();
-    } else if (endpoint.includes('/analytics/attendance')) {
-      return await mockApiService.getAnalyticsOverview();
-    } else if (endpoint.includes('/analytics/productivity')) {
-      return await mockApiService.getAnalyticsOverview();
-    } else if (endpoint.includes('/approvals/pending')) {
-      return await mockApiService.getPendingApprovals();
-    } else if (endpoint.includes('/teams')) {
-      return await mockApiService.listTeams();
-    } else if (endpoint.includes('/payroll/summary')) {
-      return await mockApiService.getPayrollSummary({ period: 'current' });
-    } else {
-      // Generic mock response
-      return { success: true, data: {}, message: 'Mock response' };
-    }
-  }
-
-  // ==================== CACHED GET METHODS ====================
-  
-  /**
-   * Get data with caching
-   * @param {string} endpoint - API endpoint
-   * @param {Object} params - Query parameters
-   * @param {Object} options - Additional options
-   * @returns {Promise} - Cached or fresh data
-   */
-  async getCached(endpoint, params = {}, options = {}) {
-    const cacheKey = this.generateCacheKey(endpoint, params);
-    const cachedData = this.getCache(cacheKey);
-    
-    if (cachedData) {
-      return cachedData;
-    }
-    
-    const query = buildQueryString(params);
-    const result = await this.request(`${endpoint}${query}`, { ...options, method: 'GET' });
-    
-    // Cache the result
-    this.setCache(cacheKey, result, options.cacheTTL);
-    
-    return result;
-  }
-
-  // ==================== BATCH REQUESTS ====================
-  
-  /**
-   * Execute multiple requests in parallel
-   * @param {Array} requests - Array of request objects
-   * @returns {Promise<Array>} - Array of results
-   */
-  async batchRequest(requests) {
-    const promises = requests.map(req => 
-      this.request(req.endpoint, req.options)
-    );
-    
-    return await Promise.allSettled(promises);
-  }
-
-  // ==================== 🔐 AUTHENTICATION (4 endpoints) ====================
-  
-  async register(payload) {
-    const result = await this.request(API_CONFIG.ENDPOINTS.AUTH.REGISTER, {
+  // Authentication aligned with Postman collection
+  async signUp(payload) {
+    const result = await this.request(API_CONFIG.ENDPOINTS.AUTH.SIGN_UP, {
       method: 'POST',
       body: JSON.stringify(payload)
     });
-    
-    const token = result?.data?.token || result?.meta?.token;
-    const csrf = result?.data?.csrf_token || result?.meta?.csrf_token;
-    if (token) this.setTokens(token, csrf);
-    
+    // Extract token from meta.token when present
+    const token = result?.meta?.token || null;
+    if (token) this.setTokens(token, result?.meta?.csrf_token || null);
     return result;
   }
 
-  async login(credentials) {
-    const result = await this.request(API_CONFIG.ENDPOINTS.AUTH.LOGIN, {
+  async signIn(credentials) {
+    const result = await this.request(API_CONFIG.ENDPOINTS.AUTH.SIGN_IN, {
       method: 'POST',
       body: JSON.stringify(credentials)
     });
-    
-    const token = result?.data?.token || result?.meta?.token;
-    const csrf = result?.data?.csrf_token || result?.meta?.csrf_token;
+    const token = result?.meta?.token || null;
+    const csrf = result?.meta?.csrf_token || null;
     if (token) this.setTokens(token, csrf);
-    
     return result;
   }
 
-  async getCurrentUser() {
-    return await this.getCached(API_CONFIG.ENDPOINTS.AUTH.ME);
+  async signOut() {
+    const res = await this.request(API_CONFIG.ENDPOINTS.AUTH.SIGN_OUT, {
+      method: 'DELETE'
+    });
+    this.clearTokens();
+    return res;
   }
 
-  async logout() {
-    try {
-      const result = await this.request(API_CONFIG.ENDPOINTS.AUTH.LOGOUT, {
-        method: 'POST'
-      });
-      this.clearTokens();
-      return result;
-    } catch (error) {
-      this.clearTokens();
-      throw error;
+  // Users & Permissions
+  async listUsers() {
+    const data = await this.request(API_CONFIG.ENDPOINTS.USERS.LIST);
+    return Array.isArray(data) ? data : (data?.data || []);
+  }
+
+  // Create a new user (matches POST /users)
+  async createUser(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.USERS.LIST, { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  // Update an existing user (PUT /users/:id)
+  async updateUser(userId, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.USERS.BY_ID.replace(':id', String(userId));
+    return await this.request(endpoint, { method: 'PUT', body: JSON.stringify(payload) });
+  }
+
+  async getUserById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.USERS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async listRoles() {
+    const data = await this.request(API_CONFIG.ENDPOINTS.ROLES.LIST);
+    return Array.isArray(data) ? data : (data?.data || []);
+  }
+
+  async updateUserPermissions(userId, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.PERMISSIONS.UPDATE.replace(':user_id', String(userId));
+    return await this.request(endpoint, { method: 'PUT', body: JSON.stringify(payload) });
+  }
+
+  // Time Tracking
+  async getUserClock(userID) {
+    const endpoint = API_CONFIG.ENDPOINTS.CLOCKS.BY_USER.replace(':userID', String(userID));
+    return await this.request(endpoint);
+  }
+
+  async clockInOut(userID, status) {
+    const endpoint = API_CONFIG.ENDPOINTS.CLOCKS.BY_USER.replace(':userID', String(userID));
+    return await this.request(endpoint, { method: 'POST', body: JSON.stringify({ status }) });
     }
+
+  async getUserWorkingTimes(userID) {
+    const endpoint = API_CONFIG.ENDPOINTS.WORKINGTIME.BY_USER.replace(':userID', String(userID));
+    const data = await this.request(endpoint);
+    return Array.isArray(data) ? data : (data?.data || []);
   }
 
-  // ==================== 👤 USER PROFILE (4 endpoints) ====================
-  
+  // Create a new working time entry for a user
+  async createWorkingTime(userID, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.WORKINGTIME.BY_USER.replace(':userID', String(userID));
+    return await this.request(endpoint, { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async logUnpaidOvertime(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.LOGS.UNPAID_OVERTIME, { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  // Schedules & Shifts
+  async getEmployeeScheduleConstraints(employee_id) {
+    const endpoint = API_CONFIG.ENDPOINTS.SCHEDULES.CONSTRAINTS.replace(':employee_id', String(employee_id));
+    return await this.request(endpoint);
+  }
+
+  async createBatchSchedules(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.SCHEDULES.CREATE_BATCH, { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  // Tasks & Skills
+  async listTasks() {
+    const data = await this.request(API_CONFIG.ENDPOINTS.TASKS.LIST);
+    return Array.isArray(data) ? data : (data?.data || []);
+  }
+
+  async createTask(task) {
+    return await this.request(API_CONFIG.ENDPOINTS.TASKS.CREATE, { method: 'POST', body: JSON.stringify({ task }) });
+  }
+
+  async updateTaskStatus(taskid, status) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.UPDATE_STATUS.replace(':taskid', String(taskid));
+    return await this.request(endpoint, { method: 'PUT', body: JSON.stringify({ status }) });
+  }
+
+  async assignTaskToUser(taskid, userid, assignment) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.ASSIGN_TO_USER
+      .replace(':taskid', String(taskid))
+      .replace(':userid', String(userid));
+    return await this.request(endpoint, { method: 'POST', body: JSON.stringify({ assignment }) });
+  }
+
+  async listSkills() {
+    const data = await this.request(API_CONFIG.ENDPOINTS.SKILLS.LIST);
+    return Array.isArray(data) ? data : (data?.data || []);
+  }
+
+  async assignSkillToUser(userid, skillid, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.SKILLS.ASSIGN_TO_USER
+      .replace(':userid', String(userid))
+      .replace(':skillid', String(skillid));
+    return await this.request(endpoint, { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async addNewSkill(label) {
+    return await this.request(API_CONFIG.ENDPOINTS.SKILLS.CREATE, { method: 'POST', body: JSON.stringify({ label }) });
+  }
+
+  // Payroll & Audit
+  async getCalculationRates() {
+    return await this.request(API_CONFIG.ENDPOINTS.PAYROLL.CALCULATION_RATES);
+  }
+
+  async getPayrollReport(id, query = {}) {
+    const endpointBase = API_CONFIG.ENDPOINTS.PAYROLL.REPORT_BY_ID.replace(':id', String(id));
+    const qs = new URLSearchParams(query).toString();
+    return await this.request(qs ? `${endpointBase}?${qs}` : endpointBase);
+  }
+
+  async validateTimesheet(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.TIMESHEETS.VALIDATE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'PUT', body: JSON.stringify(payload) });
+  }
+
+  async resolveDiscrepancy(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.AUDIT.RESOLVE_DISCREPANCY, { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async presenceVerification() {
+    return await this.request(API_CONFIG.ENDPOINTS.AUDIT.PRESENCE_VERIFICATION);
+  }
+
+  async nightShiftAlert() {
+    return await this.request(API_CONFIG.ENDPOINTS.AUDIT.NIGHT_SHIFT_ALERT);
+  }
+
+  // Integrations
+  async batsignalIntegration(signal) {
+    return await this.request(API_CONFIG.ENDPOINTS.INTEGRATIONS.BATSIGNAL, { method: 'POST', body: JSON.stringify({ signal }) });
+  }
+
+  async listIntegrations(query = {}) {
+    const qs = new URLSearchParams(query).toString();
+    const base = API_CONFIG.ENDPOINTS.INTEGRATIONS.LIST;
+    return await this.request(qs ? `${base}?${qs}` : base);
+  }
+
+  // ==================== COMPREHENSIVE API METHODS ====================
+  // Based on Gotham Time Manager API Documentation
+
+  // Authentication Methods
+  async getCurrentUser() {
+    return await this.request(API_CONFIG.ENDPOINTS.AUTH.GET_CURRENT_USER);
+  }
+
+  // User Management Methods
+  async deleteUser(userId) {
+    const endpoint = API_CONFIG.ENDPOINTS.USERS.BY_ID.replace(':id', String(userId));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  async updateUserRole(userId, roleId) {
+    const endpoint = API_CONFIG.ENDPOINTS.USERS.UPDATE_ROLE.replace(':id', String(userId));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify({ user_id: userId, role_id: roleId })
+    });
+  }
+
   async getUserProfile() {
-    return await this.getCached(API_CONFIG.ENDPOINTS.USER.PROFILE);
+    return await this.request(API_CONFIG.ENDPOINTS.USERS.PROFILE);
   }
 
   async updateUserProfile(payload) {
-    const result = await this.request(API_CONFIG.ENDPOINTS.USER.PROFILE, {
+    return await this.request(API_CONFIG.ENDPOINTS.USERS.PROFILE, {
       method: 'PUT',
       body: JSON.stringify(payload)
     });
-    
-    // Clear profile cache
-    this.clearCache(this.generateCacheKey(API_CONFIG.ENDPOINTS.USER.PROFILE));
-    
-    return result;
   }
 
   async changePassword(payload) {
-    return await this.request(API_CONFIG.ENDPOINTS.USER.PASSWORD, {
+    return await this.request(API_CONFIG.ENDPOINTS.USERS.PASSWORD, {
       method: 'PUT',
       body: JSON.stringify(payload)
     });
   }
 
   async getUserDashboard() {
-    return await this.getCached(API_CONFIG.ENDPOINTS.USER.DASHBOARD);
+    return await this.request(API_CONFIG.ENDPOINTS.USERS.DASHBOARD);
   }
 
-  // ==================== 🍕 BREAK MANAGEMENT (6 endpoints) ====================
-  
-  async startBreak(payload = { break_type: 'regular' }) {
-    const result = await this.request(API_CONFIG.ENDPOINTS.BREAKS.START, {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-    
-    // Clear break-related caches
-    this.clearCache(this.generateCacheKey(API_CONFIG.ENDPOINTS.BREAKS.STATUS));
-    
-    return result;
-  }
-
-  async endBreak() {
-    const result = await this.request(API_CONFIG.ENDPOINTS.BREAKS.END, {
-      method: 'POST'
-    });
-    
-    // Clear break-related caches
-    this.clearCache(this.generateCacheKey(API_CONFIG.ENDPOINTS.BREAKS.STATUS));
-    
-    return result;
-  }
-
-  async getBreakStatus() {
-    return await this.getCached(API_CONFIG.ENDPOINTS.BREAKS.STATUS, {}, { cacheTTL: 30000 }); // 30 seconds
-  }
-
-  async getBreakHistory(params = {}) {
-    return await this.getCached(API_CONFIG.ENDPOINTS.BREAKS.HISTORY, params);
-  }
-
-  async getBreakSummary(date) {
-    return await this.getCached(API_CONFIG.ENDPOINTS.BREAKS.SUMMARY, { date });
-  }
-
-  // ==================== ⏰ TIME TRACKING (7 endpoints) ====================
-  
+  // Time Tracking Methods
   async clockIn(payload) {
-    const result = await this.request(API_CONFIG.ENDPOINTS.TIME.CLOCK_IN, {
+    return await this.request(API_CONFIG.ENDPOINTS.TIME_TRACKING.CLOCK_IN, {
       method: 'POST',
       body: JSON.stringify(payload)
     });
-    
-    // Clear time-related caches
-    this.clearCache(this.generateCacheKey(API_CONFIG.ENDPOINTS.TIME.STATUS));
-    
-    return result;
   }
 
-  async clockOut(payload) {
-    const result = await this.request(API_CONFIG.ENDPOINTS.TIME.CLOCK_OUT, {
+  async clockOut(payload = {}) {
+    return await this.request(API_CONFIG.ENDPOINTS.TIME_TRACKING.CLOCK_OUT, {
       method: 'POST',
       body: JSON.stringify(payload)
     });
-    
-    // Clear time-related caches
-    this.clearCache(this.generateCacheKey(API_CONFIG.ENDPOINTS.TIME.STATUS));
-    
-    return result;
   }
 
-  async getTimeStatus() {
-    return await this.getCached(API_CONFIG.ENDPOINTS.TIME.STATUS, {}, { cacheTTL: 30000 }); // 30 seconds
+  async getClockStatus() {
+    return await this.request(API_CONFIG.ENDPOINTS.TIME_TRACKING.STATUS);
   }
 
-  async getTimeEntries(params = {}) {
-    return await this.getCached(API_CONFIG.ENDPOINTS.TIME.ENTRIES, params);
+  async getTimeEntries(query = {}) {
+    const qs = new URLSearchParams(query).toString();
+    const base = API_CONFIG.ENDPOINTS.TIME_TRACKING.ENTRIES;
+    return await this.request(qs ? `${base}?${qs}` : base);
   }
 
-  async createManualTimeEntry(payload) {
-    const result = await this.request(API_CONFIG.ENDPOINTS.TIME.MANUAL_ENTRY, {
+  async createManualEntry(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.TIME_TRACKING.MANUAL_ENTRY, {
       method: 'POST',
       body: JSON.stringify(payload)
     });
-    
-    // Clear time entries cache
-    this.clearCache(this.generateCacheKey(API_CONFIG.ENDPOINTS.TIME.ENTRIES));
-    
-    return result;
   }
 
   async updateTimeEntry(entryId, payload) {
-    const endpoint = replacePathParams(API_CONFIG.ENDPOINTS.TIME.ENTRY_BY_ID, { entry_id: entryId });
-    const result = await this.request(endpoint, {
+    const endpoint = API_CONFIG.ENDPOINTS.TIME_TRACKING.UPDATE_ENTRY.replace(':id', String(entryId));
+    return await this.request(endpoint, {
       method: 'PUT',
       body: JSON.stringify(payload)
     });
-    
-    // Clear time entries cache
-    this.clearCache(this.generateCacheKey(API_CONFIG.ENDPOINTS.TIME.ENTRIES));
-    
-    return result;
   }
 
   async deleteTimeEntry(entryId) {
-    const endpoint = replacePathParams(API_CONFIG.ENDPOINTS.TIME.ENTRY_BY_ID, { entry_id: entryId });
-    const result = await this.request(endpoint, {
-      method: 'DELETE'
+    const endpoint = API_CONFIG.ENDPOINTS.TIME_TRACKING.DELETE_ENTRY.replace(':id', String(entryId));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Break Management Methods
+  async startBreak() {
+    return await this.request(API_CONFIG.ENDPOINTS.BREAKS.START, {
+      method: 'POST'
     });
-    
-    // Clear time entries cache
-    this.clearCache(this.generateCacheKey(API_CONFIG.ENDPOINTS.TIME.ENTRIES));
-    
-    return result;
   }
 
-  // ==================== ✅ APPROVAL WORKFLOWS (5 endpoints) ====================
-  
-  async getPendingApprovals(params = {}) {
-    const query = buildQueryString(params);
-    return await this.request(`${API_CONFIG.ENDPOINTS.APPROVALS.PENDING}${query}`);
+  async endBreak() {
+    return await this.request(API_CONFIG.ENDPOINTS.BREAKS.END, {
+      method: 'POST'
+    });
   }
 
-  async approveTimeEntry(entryId, payload = {}) {
-    const endpoint = replacePathParams(API_CONFIG.ENDPOINTS.APPROVALS.APPROVE, { entry_id: entryId });
+  async getBreakStatus() {
+    return await this.request(API_CONFIG.ENDPOINTS.BREAKS.STATUS);
+  }
+
+  async getBreakHistory() {
+    return await this.request(API_CONFIG.ENDPOINTS.BREAKS.HISTORY);
+  }
+
+  async getBreakSummary() {
+    return await this.request(API_CONFIG.ENDPOINTS.BREAKS.SUMMARY);
+  }
+
+  // Working Times Methods
+  async getWorkingTimes() {
+    return await this.request(API_CONFIG.ENDPOINTS.WORKING_TIMES.LIST);
+  }
+
+  async createWorkingTime(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.WORKING_TIMES.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getWorkingTimeById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.WORKING_TIMES.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateWorkingTime(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.WORKING_TIMES.UPDATE.replace(':id', String(id));
     return await this.request(endpoint, {
       method: 'PUT',
       body: JSON.stringify(payload)
     });
   }
 
-  async rejectTimeEntry(entryId, payload) {
-    const endpoint = replacePathParams(API_CONFIG.ENDPOINTS.APPROVALS.REJECT, { entry_id: entryId });
+  async deleteWorkingTime(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.WORKING_TIMES.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Task Management Methods (Enhanced)
+  async getTaskById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateTask(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify({ task: payload })
+    });
+  }
+
+  async deleteTask(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  async assignTaskToUser(taskId, userId) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.ASSIGN_USER
+      .replace(':taskid', String(taskId))
+      .replace(':userid', String(userId));
+    return await this.request(endpoint, { method: 'POST' });
+  }
+
+  async removeTaskFromUser(taskId, userId) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.REMOVE_USER
+      .replace(':taskid', String(taskId))
+      .replace(':userid', String(userId));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Task Assignments
+  async getTaskAssignments() {
+    return await this.request(API_CONFIG.ENDPOINTS.TASKS.ASSIGNMENTS);
+  }
+
+  async createTaskAssignment(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.TASKS.ASSIGNMENTS, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getTaskAssignmentById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.ASSIGNMENT_BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateTaskAssignment(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.ASSIGNMENT_BY_ID.replace(':id', String(id));
     return await this.request(endpoint, {
       method: 'PUT',
       body: JSON.stringify(payload)
     });
   }
 
-  async bulkApproveEntries(entryIds) {
+  async deleteTaskAssignment(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.ASSIGNMENT_BY_ID.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Task Skills
+  async getTaskSkills() {
+    return await this.request(API_CONFIG.ENDPOINTS.TASKS.SKILLS);
+  }
+
+  async createTaskSkill(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.TASKS.SKILLS, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getTaskSkillById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.SKILL_BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateTaskSkill(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.SKILL_BY_ID.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteTaskSkill(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.SKILL_BY_ID.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  async updateTaskSkill(taskId, skillId, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.TASKS.UPDATE_SKILL
+      .replace(':taskid', String(taskId))
+      .replace(':skillid', String(skillId));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  // Approval Methods
+  async getPendingApprovals(query = {}) {
+    const qs = new URLSearchParams(query).toString();
+    const base = API_CONFIG.ENDPOINTS.APPROVALS.PENDING;
+    return await this.request(qs ? `${base}?${qs}` : base);
+  }
+
+  async approveTimeEntry(id, payload = {}) {
+    const endpoint = API_CONFIG.ENDPOINTS.APPROVALS.APPROVE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async rejectTimeEntry(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.APPROVALS.REJECT.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async bulkApprove(payload) {
     return await this.request(API_CONFIG.ENDPOINTS.APPROVALS.BULK_APPROVE, {
       method: 'POST',
-      body: JSON.stringify({ entry_ids: entryIds })
+      body: JSON.stringify(payload)
     });
   }
 
-  async getApprovalHistory(params = {}) {
-    const query = buildQueryString(params);
-    return await this.request(`${API_CONFIG.ENDPOINTS.APPROVALS.HISTORY}${query}`);
+  async getApprovalHistory() {
+    return await this.request(API_CONFIG.ENDPOINTS.APPROVALS.HISTORY);
   }
 
-  // ==================== 📊 ANALYTICS (5 endpoints) ====================
-  
-  async getAnalyticsOverview() {
-    return await this.request(API_CONFIG.ENDPOINTS.ANALYTICS.OVERVIEW);
+
+  // Reports Methods
+  async getTimesheetReport(query = {}) {
+    const qs = new URLSearchParams(query).toString();
+    const base = API_CONFIG.ENDPOINTS.REPORTS.TIMESHEET;
+    return await this.request(qs ? `${base}?${qs}` : base);
   }
 
-  async getProductivityMetrics(params = {}) {
-    const query = buildQueryString(params);
-    return await this.request(`${API_CONFIG.ENDPOINTS.ANALYTICS.PRODUCTIVITY}${query}`);
+  async getAttendanceReport(query = {}) {
+    const qs = new URLSearchParams(query).toString();
+    const base = API_CONFIG.ENDPOINTS.REPORTS.ATTENDANCE;
+    return await this.request(qs ? `${base}?${qs}` : base);
   }
 
-  async getAttendanceAnalytics(params = {}) {
-    const query = buildQueryString(params);
-    return await this.request(`${API_CONFIG.ENDPOINTS.ANALYTICS.ATTENDANCE}${query}`);
+  async getPayrollReport(query = {}) {
+    const qs = new URLSearchParams(query).toString();
+    const base = API_CONFIG.ENDPOINTS.REPORTS.PAYROLL;
+    return await this.request(qs ? `${base}?${qs}` : base);
   }
 
-  async getOvertimeAnalytics(params = {}) {
-    const query = buildQueryString(params);
-    return await this.request(`${API_CONFIG.ENDPOINTS.ANALYTICS.OVERTIME}${query}`);
+  async getOvertimeReport(query = {}) {
+    const qs = new URLSearchParams(query).toString();
+    const base = API_CONFIG.ENDPOINTS.REPORTS.OVERTIME;
+    return await this.request(qs ? `${base}?${qs}` : base);
   }
 
-  async getTeamPerformance(params = {}) {
-    const query = buildQueryString(params);
-    return await this.request(`${API_CONFIG.ENDPOINTS.ANALYTICS.TEAM_PERFORMANCE}${query}`);
-  }
-
-  // ==================== 📈 REPORTS (4 endpoints) ====================
-  
-  async generateTimesheetReport(params = {}) {
-    const query = buildQueryString(params);
-    return await this.request(`${API_CONFIG.ENDPOINTS.REPORTS.TIMESHEET}${query}`);
-  }
-
-  async generateAttendanceReport(params = {}) {
-    const query = buildQueryString(params);
-    return await this.request(`${API_CONFIG.ENDPOINTS.REPORTS.ATTENDANCE}${query}`);
-  }
-
-  async generateProductivityReport(params = {}) {
-    const query = buildQueryString(params);
-    return await this.request(`${API_CONFIG.ENDPOINTS.REPORTS.PRODUCTIVITY}${query}`);
-  }
-
-  async exportReports(params = {}) {
-    const query = buildQueryString(params);
-    return await this.request(`${API_CONFIG.ENDPOINTS.REPORTS.EXPORT}${query}`);
-  }
-
-  // ==================== ⚙️ SETTINGS (8 endpoints) ====================
-  
+  // Settings Methods
   async getProfileSettings() {
     return await this.request(API_CONFIG.ENDPOINTS.SETTINGS.PROFILE);
   }
@@ -791,11 +668,11 @@ class TicktraxApiService {
     });
   }
 
-  async getNotificationSettings() {
+  async getNotificationPreferences() {
     return await this.request(API_CONFIG.ENDPOINTS.SETTINGS.NOTIFICATIONS);
   }
 
-  async updateNotificationSettings(payload) {
+  async updateNotificationPreferences(payload) {
     return await this.request(API_CONFIG.ENDPOINTS.SETTINGS.NOTIFICATIONS, {
       method: 'PUT',
       body: JSON.stringify(payload)
@@ -813,27 +690,36 @@ class TicktraxApiService {
     });
   }
 
-  async getSystemSettings() {
-    return await this.request(API_CONFIG.ENDPOINTS.SETTINGS.SYSTEM);
+  // Payroll Methods
+  async getPayrollSummary(query = {}) {
+    const qs = new URLSearchParams(query).toString();
+    const base = API_CONFIG.ENDPOINTS.PAYROLL.SUMMARY;
+    return await this.request(qs ? `${base}?${qs}` : base);
   }
 
-  async updateSystemSettings(payload) {
-    return await this.request(API_CONFIG.ENDPOINTS.SETTINGS.SYSTEM, {
-      method: 'PUT',
-      body: JSON.stringify(payload)
-    });
+
+  // Compliance Methods
+  async getComplianceIssues() {
+    const endpoint = API_CONFIG.ENDPOINTS.COMPLIANCE.ISSUES;
+    return await this.request(endpoint);
   }
 
-  // ==================== 💰 PAYROLL (5 endpoints) ====================
-  
-  async getPayrollSummary(params = {}) {
-    const query = buildQueryString(params);
-    return await this.request(`${API_CONFIG.ENDPOINTS.PAYROLL.SUMMARY}${query}`);
+  // Labor Methods
+  async getLaborDistribution() {
+    const endpoint = API_CONFIG.ENDPOINTS.LABOR.DISTRIBUTION;
+    return await this.request(endpoint);
   }
 
-  async getPayrollHistory(params = {}) {
-    const query = buildQueryString(params);
-    return await this.request(`${API_CONFIG.ENDPOINTS.PAYROLL.HISTORY}${query}`);
+  // Reports Methods
+  async getTurnoverReport(query = {}) {
+    const endpoint = API_CONFIG.ENDPOINTS.REPORTS.TURNOVER;
+    const queryString = new URLSearchParams(query).toString();
+    const fullEndpoint = queryString ? `${endpoint}?${queryString}` : endpoint;
+    return await this.request(fullEndpoint);
+  }
+
+  async getPayrollHistory() {
+    return await this.request(API_CONFIG.ENDPOINTS.PAYROLL.HISTORY);
   }
 
   async generatePayroll(payload) {
@@ -848,42 +734,36 @@ class TicktraxApiService {
   }
 
   async updatePayRates(userId, payload) {
-    const endpoint = replacePathParams(API_CONFIG.ENDPOINTS.PAYROLL.UPDATE_RATES, { user_id: userId });
+    const endpoint = API_CONFIG.ENDPOINTS.PAYROLL.UPDATE_RATES.replace(':user_id', String(userId));
     return await this.request(endpoint, {
       method: 'PUT',
       body: JSON.stringify(payload)
     });
   }
 
-  // ==================== 🔔 NOTIFICATIONS (6 endpoints) ====================
-  
-  async listNotifications(params = {}) {
-    const query = buildQueryString(params);
-    return await this.request(`${API_CONFIG.ENDPOINTS.NOTIFICATIONS.LIST}${query}`);
+  // Notifications Methods
+  async getNotifications() {
+    return await this.request(API_CONFIG.ENDPOINTS.NOTIFICATIONS.LIST);
   }
 
-  async getUnreadCount() {
+  async getUnreadNotificationCount() {
     return await this.request(API_CONFIG.ENDPOINTS.NOTIFICATIONS.UNREAD_COUNT);
   }
 
-  async markNotificationRead(notificationId) {
-    const endpoint = replacePathParams(API_CONFIG.ENDPOINTS.NOTIFICATIONS.MARK_READ, { notification_id: notificationId });
-    return await this.request(endpoint, {
-      method: 'PUT'
-    });
+  async markNotificationAsRead(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.NOTIFICATIONS.MARK_READ.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'PUT' });
   }
 
-  async markAllNotificationsRead() {
+  async markAllNotificationsAsRead() {
     return await this.request(API_CONFIG.ENDPOINTS.NOTIFICATIONS.MARK_ALL_READ, {
       method: 'PUT'
     });
   }
 
-  async deleteNotification(notificationId) {
-    const endpoint = replacePathParams(API_CONFIG.ENDPOINTS.NOTIFICATIONS.DELETE, { notification_id: notificationId });
-    return await this.request(endpoint, {
-      method: 'DELETE'
-    });
+  async deleteNotification(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.NOTIFICATIONS.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
   }
 
   async updateNotificationPreferences(payload) {
@@ -893,43 +773,13 @@ class TicktraxApiService {
     });
   }
 
-  // ==================== 👥 USER MANAGEMENT (5 endpoints) ====================
-  
-  async listUsers() {
-    return await this.request(API_CONFIG.ENDPOINTS.USERS.LIST);
-  }
-
-  async createUser(payload) {
-    return await this.request(API_CONFIG.ENDPOINTS.USERS.CREATE, {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-  }
-
-  async getUserById(userId) {
-    const endpoint = replacePathParams(API_CONFIG.ENDPOINTS.USERS.BY_ID, { user_id: userId });
-    return await this.request(endpoint);
-  }
-
-  async updateUser(userId, payload) {
-    const endpoint = replacePathParams(API_CONFIG.ENDPOINTS.USERS.BY_ID, { user_id: userId });
-    return await this.request(endpoint, {
-      method: 'PUT',
-      body: JSON.stringify(payload)
-    });
-  }
-
-  async deleteUser(userId) {
-    const endpoint = replacePathParams(API_CONFIG.ENDPOINTS.USERS.BY_ID, { user_id: userId });
-    return await this.request(endpoint, {
-      method: 'DELETE'
-    });
-  }
-
-  // ==================== 👨‍👩‍👧‍👦 TEAM MANAGEMENT (3 endpoints) ====================
-  
-  async listTeams() {
+  // Teams Methods
+  async getTeams() {
     return await this.request(API_CONFIG.ENDPOINTS.TEAMS.LIST);
+  }
+
+  async listTeams() {
+    return await this.getTeams(); // Alias for consistency with component usage
   }
 
   async createTeam(payload) {
@@ -939,17 +789,26 @@ class TicktraxApiService {
     });
   }
 
-  async assignTeamManager(teamId, payload) {
-    const endpoint = replacePathParams(API_CONFIG.ENDPOINTS.TEAMS.ASSIGN_MANAGER, { team_id: teamId });
+  async getTeamById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.TEAMS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateTeam(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.TEAMS.UPDATE.replace(':id', String(id));
     return await this.request(endpoint, {
       method: 'PUT',
       body: JSON.stringify(payload)
     });
   }
 
-  // ==================== 📁 PROJECT MANAGEMENT (2 endpoints) ====================
-  
-  async listProjects() {
+  async deleteTeam(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.TEAMS.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Projects Methods
+  async getProjects() {
     return await this.request(API_CONFIG.ENDPOINTS.PROJECTS.LIST);
   }
 
@@ -960,151 +819,291 @@ class TicktraxApiService {
     });
   }
 
-  // ==================== ✓ TASK MANAGEMENT (3 endpoints) ====================
-  
-  async listTasks() {
-    return await this.request(API_CONFIG.ENDPOINTS.TASKS.LIST);
+  async getProjectById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.PROJECTS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
   }
 
-  async createTask(payload) {
-    return await this.request(API_CONFIG.ENDPOINTS.TASKS.CREATE, {
+  async updateProject(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.PROJECTS.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteProject(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.PROJECTS.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Skills Methods (Enhanced)
+  async getSkillById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.SKILLS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateSkill(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.SKILLS.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteSkill(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.SKILLS.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // User Skills Methods
+  async getUserSkills() {
+    return await this.request(API_CONFIG.ENDPOINTS.USER_SKILLS.LIST);
+  }
+
+  async createUserSkill(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.USER_SKILLS.LIST, {
       method: 'POST',
       body: JSON.stringify(payload)
     });
   }
 
-  async updateTaskStatus(taskId, status) {
-    const endpoint = replacePathParams(API_CONFIG.ENDPOINTS.TASKS.UPDATE_STATUS, { task_id: taskId });
+  async getUserSkillById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.USER_SKILLS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateUserSkill(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.USER_SKILLS.BY_ID.replace(':id', String(id));
     return await this.request(endpoint, {
       method: 'PUT',
-      body: JSON.stringify({ status })
+      body: JSON.stringify(payload)
     });
   }
 
-  // ==================== 📅 SCHEDULE MANAGEMENT (3 endpoints) ====================
-  
-  async listSchedules() {
-    return await this.request(API_CONFIG.ENDPOINTS.SCHEDULES.LIST);
+  async deleteUserSkill(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.USER_SKILLS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  async assignSkillToUser(userId, skillId) {
+    const endpoint = API_CONFIG.ENDPOINTS.USER_SKILLS.ASSIGN
+      .replace(':userid', String(userId))
+      .replace(':skillid', String(skillId));
+    return await this.request(endpoint, { method: 'POST' });
+  }
+
+  async removeSkillFromUser(userId, skillId) {
+    const endpoint = API_CONFIG.ENDPOINTS.USER_SKILLS.REMOVE
+      .replace(':userid', String(userId))
+      .replace(':skillid', String(skillId));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Schedules Methods (Enhanced)
+  async getSchedules(params = {}) {
+    const endpoint = API_CONFIG.ENDPOINTS.SCHEDULES.LIST;
+    const queryString = new URLSearchParams(params).toString();
+    const fullEndpoint = queryString ? `${endpoint}?${queryString}` : endpoint;
+    return await this.request(fullEndpoint);
   }
 
   async createSchedule(payload) {
-    return await this.request(API_CONFIG.ENDPOINTS.SCHEDULES.CREATE, {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-  }
-
-  async createBatchSchedules(schedules) {
-    return await this.request(API_CONFIG.ENDPOINTS.SCHEDULES.CREATE_BATCH, {
-      method: 'POST',
-      body: JSON.stringify({ schedules })
-    });
-  }
-
-  // ==================== ⏱️ WORKING TIMES (2 endpoints) ====================
-  
-  async listWorkingTimes() {
-    return await this.request(API_CONFIG.ENDPOINTS.WORKING_TIMES.LIST);
-  }
-
-  async logUnpaidOvertime(payload) {
-    return await this.request(API_CONFIG.ENDPOINTS.WORKING_TIMES.LOG_UNPAID_OVERTIME, {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-  }
-
-  // ==================== ADDITIONAL ENHANCED METHODS ====================
-  
-  /**
-   * Preload critical data for better UX
-   * @param {Array} endpoints - Array of endpoints to preload
-   */
-  async preloadData(endpoints) {
-    const promises = endpoints.map(endpoint => 
-      this.getCached(endpoint).catch(error => {
-        console.warn(`[API] Preload failed for ${endpoint}:`, error);
-        return null;
-      })
-    );
-    
-    return await Promise.allSettled(promises);
-  }
-
-  /**
-   * Get offline data from cache
-   * @param {string} endpoint - API endpoint
-   * @returns {any|null} - Cached data or null
-   */
-  getOfflineData(endpoint) {
-    return this.getCache(this.generateCacheKey(endpoint));
-  }
-
-  /**
-   * Check if data is available offline
-   * @param {string} endpoint - API endpoint
-   * @returns {boolean} - True if data is cached
-   */
-  isOfflineAvailable(endpoint) {
-    return this.getCache(this.generateCacheKey(endpoint)) !== null;
-  }
-
-  // ==================== ADDITIONAL API METHODS ====================
-  
-  /**
-   * Get notifications (for real-time service)
-   */
-  async getNotifications(params = {}) {
-    return await this.listNotifications(params);
-  }
-
-  /**
-   * Get current status (for real-time service)
-   */
-  async getCurrentStatus() {
-    return await this.getTimeStatus();
-  }
-
-  /**
-   * Get team members (for manager dashboard)
-   */
-  async getTeamMembers() {
-    return await this.listUsers();
-  }
-
-  // ==================== LEGACY ENDPOINTS (Backward Compatibility) ====================
-  
-  async getUserClock(userID) {
-    const endpoint = replacePathParams(API_CONFIG.ENDPOINTS.CLOCKS.BY_USER, { userID });
-    return await this.request(endpoint);
-  }
-
-  async clockInOut(userID, status) {
-    const endpoint = replacePathParams(API_CONFIG.ENDPOINTS.CLOCKS.BY_USER, { userID });
+    const endpoint = API_CONFIG.ENDPOINTS.SCHEDULES.CREATE;
     return await this.request(endpoint, {
       method: 'POST',
-      body: JSON.stringify({ status })
+      body: JSON.stringify(payload)
     });
   }
 
-  async getUserWorkingTimes(userID) {
-    const endpoint = replacePathParams(API_CONFIG.ENDPOINTS.WORKINGTIME.BY_USER, { userID });
+  async getScheduleById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.SCHEDULES.BY_ID.replace(':id', String(id));
     return await this.request(endpoint);
   }
 
-  async listRoles() {
-    return await this.request(API_CONFIG.ENDPOINTS.ROLES.LIST);
-  }
-
-  async updateUserPermissions(userId, payload) {
-    const endpoint = replacePathParams(API_CONFIG.ENDPOINTS.PERMISSIONS.UPDATE, { user_id: userId });
+  async updateSchedule(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.SCHEDULES.UPDATE.replace(':id', String(id));
     return await this.request(endpoint, {
       method: 'PUT',
       body: JSON.stringify(payload)
     });
+  }
+
+  async deleteSchedule(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.SCHEDULES.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Shifts Methods
+  async getShifts() {
+    return await this.request(API_CONFIG.ENDPOINTS.SHIFTS.LIST);
+  }
+
+  async createShift(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.SHIFTS.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getShiftById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.SHIFTS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateShift(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.SHIFTS.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteShift(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.SHIFTS.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Leaves Methods
+  async getLeaves() {
+    return await this.request(API_CONFIG.ENDPOINTS.LEAVES.LIST);
+  }
+
+  async createLeave(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.LEAVES.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getLeaveById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.LEAVES.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateLeave(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.LEAVES.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteLeave(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.LEAVES.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Roles Methods
+  async getRoleById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.ROLES.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async deleteUserPermissions(userId) {
+    const endpoint = API_CONFIG.ENDPOINTS.PERMISSIONS.DELETE.replace(':user_id', String(userId));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Activities Methods
+  async getBillableActivities() {
+    return await this.request(API_CONFIG.ENDPOINTS.ACTIVITIES.BILLABLE);
+  }
+
+  // Unrecognized Works Methods
+  async getUnrecognizedWorks() {
+    return await this.request(API_CONFIG.ENDPOINTS.UNRECOGNIZED_WORKS.LIST);
+  }
+
+  async createUnrecognizedWork(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.UNRECOGNIZED_WORKS.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getUnrecognizedWorkById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.UNRECOGNIZED_WORKS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateUnrecognizedWork(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.UNRECOGNIZED_WORKS.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteUnrecognizedWork(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.UNRECOGNIZED_WORKS.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Compensation Logs Methods
+  async getCompensationLogs() {
+    return await this.request(API_CONFIG.ENDPOINTS.COMPENSATION_LOGS.LIST);
+  }
+
+  async createCompensationLog(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.COMPENSATION_LOGS.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getCompensationLogById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.COMPENSATION_LOGS.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateCompensationLog(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.COMPENSATION_LOGS.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteCompensationLog(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.COMPENSATION_LOGS.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Integration Methods (Enhanced)
+  async createIntegration(payload) {
+    return await this.request(API_CONFIG.ENDPOINTS.INTEGRATION.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getIntegrationById(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.INTEGRATION.BY_ID.replace(':id', String(id));
+    return await this.request(endpoint);
+  }
+
+  async updateIntegration(id, payload) {
+    const endpoint = API_CONFIG.ENDPOINTS.INTEGRATION.UPDATE.replace(':id', String(id));
+    return await this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteIntegration(id) {
+    const endpoint = API_CONFIG.ENDPOINTS.INTEGRATION.DELETE.replace(':id', String(id));
+    return await this.request(endpoint, { method: 'DELETE' });
+  }
+
+  // Mock API Service Fallback
+  async getMockResponse(endpoint, options = {}) {
+    // This would be implemented with mock data for development/testing
+    console.warn(`[API] Mock service fallback for ${endpoint}`);
+    throw new Error('Mock service not implemented');
   }
 }
 
 // Export singleton instance
-export const apiService = new TicktraxApiService();
+export const apiService = new GothamApiService();
 export default apiService;

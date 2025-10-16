@@ -24,25 +24,63 @@ console.debug('[EmployeeManagement] module loaded');
 import { ref, onMounted } from 'vue';
 import Card from '../ui/card.vue';
 import Button from '../ui/button.vue';
+import apiService from '../../services/apiService.js';
+import { toast } from 'vue-sonner';
+import { API_CONFIG } from '../../config/api.js';
 
-const employees = ref([
-  { id: 1, name: 'Ava Johnson', role: 'Engineer', active: true },
-  { id: 2, name: 'Liam Smith', role: 'Designer', active: true },
-  { id: 3, name: 'Olivia Brown', role: 'Product', active: false },
-]);
+const employees = ref([]);
+const loading = ref(false);
 
-const viewProfile = (emp) => {
-  console.debug('[EmployeeManagement] viewProfile ->', emp.id);
-  alert(`Open profile for ${emp.name}`);
+const normalizeUser = (u) => {
+  const attrs = u.attributes || {};
+  return {
+    id: u.id || attrs.id,
+    name: attrs.first_name ? `${attrs.first_name} ${attrs.last_name}` : (u.name || u.email || 'Unknown'),
+    role: (attrs.role || u.role || 'employee'),
+    active: ((attrs.status || u.status || 'active').toLowerCase() === 'active')
+  };
 };
 
-const toggleActive = (emp) => {
-  emp.active = !emp.active;
-  console.debug('[EmployeeManagement] toggleActive ->', emp.id, emp.active);
+const loadEmployees = async () => {
+  loading.value = true;
+  try {
+    const users = await apiService.listUsers();
+    const userArray = Array.isArray(users) ? users : (users?.data || []);
+    employees.value = userArray.map(normalizeUser);
+  } catch (e) {
+    console.error('Failed to load employees', e);
+    toast.error('Unable to load employees');
+  } finally {
+    loading.value = false;
+  }
+};
+
+const viewProfile = async (emp) => {
+  try {
+    const detail = await apiService.getUserById(emp.id);
+    // Show a simple profile preview; replace with a proper modal if available
+    alert(`Profile: ${emp.name}\nRole: ${emp.role}\n${JSON.stringify(detail, null, 2)}`);
+  } catch (e) {
+    console.error('Failed to load profile', e);
+    toast.error('Unable to load profile');
+  }
+};
+
+const toggleActive = async (emp) => {
+  const newStatus = emp.active ? 'inactive' : 'active';
+  const endpoint = API_CONFIG.ENDPOINTS.USERS.BY_ID.replace(':id', String(emp.id));
+  try {
+    await apiService.request(endpoint, { method: 'PUT', body: JSON.stringify({ user: { status: newStatus } }) });
+    emp.active = !emp.active;
+    toast.success(`${emp.name} is now ${emp.active ? 'active' : 'inactive'}`);
+  } catch (e) {
+    console.error('Failed to update user status', e);
+    toast.error('Unable to update user status');
+  }
 };
 
 onMounted(() => {
-  console.debug('[EmployeeManagement] mounted');
+  loadEmployees();
 });
 </script>
 

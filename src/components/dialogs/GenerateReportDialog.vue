@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import {
   Dialog,
   DialogContent,
@@ -30,6 +30,24 @@ const isGenerating = ref(false);
 const selectedReport = ref('');
 const selectedFormat = ref('pdf');
 const selectedPeriod = ref('current-week');
+
+// Preview data for report preview area
+const previewData = ref([]);
+
+// Populate a lightweight preview for team-hours when selected
+watch(selectedReport, (val) => {
+  if (val === 'team-hours') {
+    // Example preview rows — replace with real API data when available
+    previewData.value = [
+      { name: 'Alice Johnson', hours: 38 },
+      { name: 'Carlos Mendez', hours: 41.5 },
+      { name: 'Priya Singh', hours: 36 },
+      { name: 'Michael Brown', hours: 44 },
+    ];
+  } else {
+    previewData.value = [];
+  }
+});
 
 const managerReports = [
   {
@@ -201,6 +219,30 @@ const handleGenerate = async () => {
             <option value="current-year">Current Year</option>
             <option value="custom">Custom Date Range</option>
           </select>
+        </div>
+
+        <!-- Report Preview -->
+        <div v-if="selectedReport === 'team-hours'" class="space-y-2">
+          <Label>Weekly hours breakdown</Label>
+          <div class="overflow-x-auto bg-muted p-3 rounded-md">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-left text-xs text-muted-foreground">
+                  <th class="pb-2">Employee</th>
+                  <th class="pb-2">Hours</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in previewData" :key="row.name" class="border-t border-border">
+                  <td class="py-2">{{ row.name }}</td>
+                  <td class="py-2">{{ row.hours }}</td>
+                </tr>
+                <tr v-if="previewData.length === 0">
+                  <td colspan="2" class="py-2 text-sm text-muted-foreground">No preview data available</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 

@@ -85,7 +85,7 @@
         </div>
 
         <div v-else-if="currentView === 'analytics'">
-          <Analytics />
+          <!-- Analytics component removed -->
         </div>
 
         <div v-else-if="currentView === 'settings'">
@@ -168,7 +168,7 @@ import Approvals from './Approvals.vue';
 import Alerts from './Alerts.vue';
 import TeamOverview from './TeamOverview.vue';
 import EmployeeManagement from './EmployeeManagement.vue';
-import Analytics from './Analytics.vue';
+// Analytics component removed
 import Settings from './Settings.vue';
 import Profile from './Profile.vue';
 import DashboardLayout from '../DashboardLayout.vue';
@@ -177,8 +177,7 @@ import Card from '../ui/card.vue';
 import { CardContent } from '../ui/card-components.vue';
 import Button from '../ui/button.vue';
 import authManager from '../../services/authService.js';
-import { apiService } from '../../services/apiService.js';
-import cordovaIntegration from '../../services/cordovaIntegration.js';
+import apiService from '../../services/apiService.js';
 
 const { toast } = useToast();
 
@@ -264,69 +263,12 @@ const checkAuthState = async () => {
   }
 };
 
-const handleLogin = async (userName, role) => {
-  console.log('📱 Mobile: Login successful', userName, role);
+const handleLogin = (userName, role) => {
   user.value = { name: userName, role };
   currentView.value = isMobile.value ? 'clock' : 'dashboard';
   toast.success(`Welcome back, ${userName}!`);
-  
-  // Load initial data
-  await loadMobileData();
-};
-
-// Load mobile data from API
-const loadMobileData = async () => {
-  try {
-    console.log('📱 Loading mobile data from API...');
-    
-    const userRes = await authManager.getCurrentUser();
-    if (!userRes || !userRes.data) return;
-    
-    const userId = userRes.data.id;
-    
-    // Get clock status
-    const statusRes = await apiService.getCurrentStatus(userId);
-    if (statusRes) {
-      clockedIn.value = statusRes.is_clocked_in || false;
-      if (statusRes.clock_in_time) {
-        const time = new Date(statusRes.clock_in_time);
-        clockInTime.value = time.toLocaleTimeString('en-US', { 
-          hour12: false,
-          hour: '2-digit',
-          minute: '2-digit'
-        });
-      }
-      workTimeToday.value = (statusRes.total_hours_today || 0).toFixed(1);
-    }
-    
-    // Get time entries
-    const entriesRes = await apiService.getUserWorkingTimes(userId);
-    if (entriesRes && Array.isArray(entriesRes)) {
-      // Calculate weekly and monthly hours
-      const now = new Date();
-      const startOfWeek = new Date(now);
-      startOfWeek.setDate(now.getDate() - now.getDay());
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      
-      let weekHours = 0;
-      let monthHours = 0;
-      
-      entriesRes.forEach(entry => {
-        const entryDate = new Date(entry.date || entry.start_date);
-        const hours = entry.duration_hours || entry.hours || 0;
-        
-        if (entryDate >= startOfWeek) weekHours += hours;
-        if (entryDate >= startOfMonth) monthHours += hours;
-      });
-      
-      weeklyHours.value = weekHours.toFixed(1);
-      monthlyHours.value = monthHours.toFixed(1);
-    }
-    
-    console.log('📱 Mobile data loaded successfully');
-  } catch (error) {
-    console.error('📱 Error loading mobile data:', error);
-  }
+  // Load metrics for the logged-in user
+  loadUserMetrics();
 };
 
 const handleLogout = async () => {
@@ -431,80 +373,79 @@ if (typeof window !== 'undefined') {
 
 const handleClockIn = async () => {
   try {
-    console.log('📱 Mobile: Clock In - getting location...');
-    
-    // Get location if Cordova is available
-    let location = null;
-    if (cordovaIntegration.isCordova()) {
-      try {
-        location = await cordovaIntegration.getCurrentLocation();
-        console.log('📍 Location obtained:', location);
-      } catch (locError) {
-        console.warn('📍 Location error:', locError);
-        // Continue without location
-      }
+    // call API to clock in
+    const cur = await authManager.getCurrentUser();
+    const uid = cur?.data?.id || cur?.data?.attributes?.id || null;
+    if (uid) {
+      await apiService.clockInOut(uid, 'in');
     }
-    
-    console.log('📱 Calling clock in API...');
-    const result = await apiService.clockIn(location ? {
-      latitude: location.latitude,
-      longitude: location.longitude
-    } : null);
-    console.log('📱 Clock In result:', result);
-    
     clockedIn.value = true;
     clockInTime.value = new Date().toLocaleTimeString('en-US', { 
       hour12: false,
       hour: '2-digit',
       minute: '2-digit'
     });
-    
-    // Vibrate feedback
-    cordovaIntegration.vibrate(100);
     toast.success('Clocked in successfully');
-    
-    // Refresh data
-    await loadMobileData();
+    // refresh metrics on clock action
+    await loadUserMetrics();
   } catch (error) {
-    console.error('📱 Clock in error:', error);
-    toast.error('Failed to clock in: ' + error.message);
+    toast.error('Failed to clock in');
   }
 };
 
 const handleClockOut = async () => {
   try {
-    console.log('📱 Mobile: Clock Out - getting location...');
-    
-    // Get location if Cordova is available
-    let location = null;
-    if (cordovaIntegration.isCordova()) {
-      try {
-        location = await cordovaIntegration.getCurrentLocation();
-        console.log('📍 Location obtained:', location);
-      } catch (locError) {
-        console.warn('📍 Location error:', locError);
-      }
+    // call API to clock out
+    const cur = await authManager.getCurrentUser();
+    const uid = cur?.data?.id || cur?.data?.attributes?.id || null;
+    if (uid) {
+      await apiService.clockInOut(uid, 'out');
     }
-    
-    console.log('📱 Calling clock out API...');
-    const result = await apiService.clockOut(location ? {
-      latitude: location.latitude,
-      longitude: location.longitude
-    } : null);
-    console.log('📱 Clock Out result:', result);
-    
     clockedIn.value = false;
     clockInTime.value = '';
-    
-    // Vibrate feedback
-    cordovaIntegration.vibrate(200);
     toast.success('Clocked out successfully');
-    
-    // Refresh data
-    await loadMobileData();
+    await loadUserMetrics();
   } catch (error) {
-    console.error('📱 Clock out error:', error);
-    toast.error('Failed to clock out: ' + error.message);
+    toast.error('Failed to clock out');
+  }
+};
+
+// Load user metrics (today/weekly/monthly hours) from working times
+const loadUserMetrics = async () => {
+  try {
+    const cur = await authManager.getCurrentUser();
+    const uid = cur?.data?.id || cur?.data?.attributes?.id || null;
+    if (!uid) return;
+    const rows = await apiService.getUserWorkingTimes(uid);
+    const arr = Array.isArray(rows) ? rows : (rows?.data || []);
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    let todayMinutes = 0;
+    let weekHours = 0;
+    let monthHours = 0;
+    for (const r of arr) {
+      const start = r.start_time || r.timestamp || '';
+      const datePart = start ? String(start).split('T')[0] : '';
+      const hours = Number(r.duration_hours || r.hours || 0) || 0;
+      if (datePart === todayStr) {
+        todayMinutes += hours * 60;
+      }
+      // weekly: last 7 days
+      const entryDate = start ? new Date(start) : null;
+      if (entryDate) {
+        const daysAgo = Math.floor((now - entryDate) / (1000 * 60 * 60 * 24));
+        if (daysAgo >=0 && daysAgo < 7) weekHours += hours;
+        if (entryDate.getMonth() === now.getMonth() && entryDate.getFullYear() === now.getFullYear()) monthHours += hours;
+      }
+    }
+    // format HH:MM for workTimeToday
+    const h = Math.floor(todayMinutes / 60);
+    const m = Math.round(todayMinutes % 60);
+    workTimeToday.value = `${h}:${String(m).padStart(2,'0')}`;
+    weeklyHours.value = `${Math.round(weekHours)}h`;
+    monthlyHours.value = `${Math.round(monthHours)}h`;
+  } catch (e) {
+    console.warn('loadUserMetrics failed', e);
   }
 };
 

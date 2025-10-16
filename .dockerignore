@@ -1,0 +1,50 @@
+# Mobile-related directories and files
+mobile/
+www/
+build/
+src/components/mobile/
+src/config/mobile.js
+src/services/mobileService.js
+src/services/cordovaService.js
+
+# Development files
+node_modules/
+npm-debug.log*
+npm-run-dev.log
+*.log
+
+# Build artifacts
+dist/
+build/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Backup files
+*.backup
+src/services/apiService_old.js
+src/services/authService.js.backup
+src/services/realTimeService_gotham.js
+src/services/realTimeService_simple.js
+src/utils/apiTest.js
+
+# Test files
+**/*.test.js
+**/*.spec.js
+test/
+tests/
+
+# Documentation
+README.md
+docs/

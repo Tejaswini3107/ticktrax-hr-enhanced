@@ -10,7 +10,7 @@ import authManager from '../../services/authService.js';
 
 const emit = defineEmits(['login']);
 
-const emailOrUsername = ref("");
+const email = ref("");
 const password = ref("");
 const showPassword = ref(false);
 const error = ref("");
@@ -18,52 +18,53 @@ const isLoading = ref(false);
 
 const handleLogin = async () => {
   error.value = "";
-  const email = (emailOrUsername.value || '').trim();
+  const emailVal = (email.value || '').trim();
   const pwd = (password.value || '').trim();
-  if (!email || !pwd) {
+  if (!emailVal || !pwd) {
     error.value = "Email and password are required";
     return;
   }
   isLoading.value = true;
-  
   try {
-    // Demo login system - bypass real API for development
-    if (pwd === 'demo123') {
-      // Determine role based on email
-      let role = 'employee';
-      let name = email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    const result = await authManager.login(emailVal, pwd);
+    if (result.success && result.user) {
+      // Create user display name from available fields
+      const firstName = result.user.first_name || '';
+      const lastName = result.user.last_name || '';
+      const username = result.user.username || '';
+      const email = result.user.email || '';
       
-      if (email.includes('manager')) {
-        role = 'manager';
-        name = 'Manager User';
-      } else if (email.includes('hr')) {
-        role = 'hr';
-        name = 'HR User';
-      } else if (email.includes('admin')) {
-        role = 'admin';
-        name = 'Admin User';
+      // Use first name + last name, fallback to username, then email
+      let displayName = '';
+      if (firstName && lastName) {
+        displayName = `${firstName} ${lastName}`;
+      } else if (username) {
+        displayName = username;
+      } else if (email) {
+        displayName = email.split('@')[0]; // Use email prefix
       } else {
-        name = 'Employee User';
+        displayName = 'User';
       }
       
-      emit('login', name, role);
+      emit('login', displayName, result.user.role);
     } else {
-      error.value = "Use password 'demo123' for demo access";
+      error.value = result.error || "Invalid email or password";
     }
   } catch (err) {
-    error.value = err?.message || "Login failed";
+    console.error('Login error:', err);
+    error.value = err?.message || "Invalid email or password";
   } finally {
     isLoading.value = false;
   }
 };
 
 const getFormValues = () => ({
-  emailOrUsername: emailOrUsername.value,
+  email: email.value,
   password: password.value
 });
 
 const clearForm = () => {
-  emailOrUsername.value = "";
+  email.value = "";
   password.value = "";
   error.value = "";
 };
@@ -71,7 +72,7 @@ const clearForm = () => {
 defineExpose({
   getFormValues,
   clearForm,
-  emailOrUsername,
+  email,
   password
 });
 </script>
@@ -87,10 +88,6 @@ defineExpose({
         </div>
         <h1>TICKTRAX</h1>
         <p class="text-muted-foreground">Time Tracking System</p>
-        <div class="text-xs text-blue-600 bg-blue-50 p-2 rounded">
-          <strong>Demo Mode:</strong> Use any email + password "demo123"<br>
-          Try: hr@demo.com, manager@demo.com, admin@demo.com
-        </div>
       </div>
 
       <Card>
@@ -99,12 +96,12 @@ defineExpose({
         </CardHeader>
         <CardContent class="space-y-4">
           <div class="space-y-2">
-            <Label for="emailOrUsername">Email Address</Label>
+            <Label for="email">Email Address</Label>
             <Input 
-              id="emailOrUsername" 
+              id="email" 
               type="email"
               placeholder="Enter your email address"
-              v-model="emailOrUsername" 
+              v-model="email" 
               @keydown.enter="handleLogin" 
             />
           </div>

@@ -163,6 +163,9 @@ import {
   Clock, Play, Square, Coffee, FileText, History, 
   MapPin, Loader2 
 } from 'lucide-vue-next';
+import apiService from '../../services/apiService.js';
+import authManager from '../../services/authService.js';
+import { toast } from 'vue-sonner';
 
 const props = defineProps({
   clockedIn: { type: Boolean, default: false },
@@ -186,12 +189,30 @@ const isLoading = ref(false);
 const currentLocation = ref('');
 const locationVerified = ref(false);
 
-const recentActivity = ref([
-  { id: 1, type: 'out', date: 'Yesterday', time: '17:30' },
-  { id: 2, type: 'in', date: 'Yesterday', time: '09:00' },
-  { id: 3, type: 'out', date: 'Oct 5', time: '17:45' },
-  { id: 4, type: 'in', date: 'Oct 5', time: '08:55' },
-]);
+const recentActivity = ref([]);
+
+const loadRecentActivity = async () => {
+  try {
+    const cur = await authManager.getCurrentUser();
+    const uid = cur?.data?.id || cur?.data?.attributes?.id || null;
+    if (!uid) return;
+    const rows = await apiService.getUserClock(uid);
+    const arr = Array.isArray(rows) ? rows : (rows?.data || []);
+    recentActivity.value = arr.slice(-10).reverse().map(r => {
+      // r may have fields like id, type, timestamp/start_time
+      const ts = r.timestamp || r.created_at || r.time || r.start_time || '';
+      const d = ts ? new Date(ts) : null;
+      return {
+        id: r.id || r._id || Math.random().toString(36).slice(2,9),
+        type: (r.type || r.action || (r.status === 'in' ? 'in' : (r.status === 'out' ? 'out' : (r.clock_in ? 'in' : 'out')))),
+        date: d ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : (r.date || ''),
+        time: d ? d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }) : (r.time || '')
+      };
+    });
+  } catch (e) {
+    console.warn('Failed to load recent activity', e);
+  }
+};
 
 let timeInterval;
 
@@ -202,12 +223,17 @@ onMounted(() => {
   if (props.locationEnabled) {
     getCurrentLocation();
   }
+  // load recent activity from API
+  loadRecentActivity();
+  // refresh when other parts of app dispatch 'clock-changed'
+  window.addEventListener('clock-changed', loadRecentActivity);
 });
 
 onUnmounted(() => {
   if (timeInterval) {
     clearInterval(timeInterval);
   }
+  window.removeEventListener('clock-changed', loadRecentActivity);
 });
 
 const updateTime = () => {
@@ -256,6 +282,8 @@ const toggleClock = async () => {
     } else {
       await emit('clock-in');
     }
+    // schedule a local refresh: parent may call server, so allow a small delay
+    setTimeout(() => loadRecentActivity(), 1500);
   } catch (error) {
     console.error('Clock toggle failed:', error);
   } finally {

@@ -15,12 +15,20 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
-    outDir: 'build',
+    // Output to Cordova's www folder so the mobile project can serve the built files
+    outDir: 'www',
     sourcemap: true,
   },
   server: {
     port: 3000,
     open: true,
+    host: '127.0.0.1',
+    // Use polling for file watching in constrained environments to avoid EMFILE errors
+    watch: {
+      usePolling: true,
+      interval: 1000,
+      binaryInterval: 1000
+    },
     // Proxy API calls in development to avoid CORS and preflight issues
     proxy: {
       // Proxy any request starting with /api to the production API server

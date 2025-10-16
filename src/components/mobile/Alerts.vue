@@ -24,19 +24,49 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import Card from '../ui/card.vue';
 import { CardContent } from '../ui/card-components.vue';
 import Button from '../ui/button.vue';
+import toast from '../../utils/toast.js';
+import apiService from '../../services/apiService.js';
+import authManager from '../../services/authService.js';
 
-const alertItems = ref([
-  { id: 1, title: 'Server CPU high', time: '10m ago', severity: 'High' },
-  { id: 2, title: 'Approval pending: Bob', time: '1h ago', severity: 'Medium' }
-]);
+const alertItems = ref([]);
 
-const refresh = () => {
-  alert('Refreshing alerts (demo)');
+const loadAlerts = async () => {
+  try {
+    const cur = await authManager.getCurrentUser();
+    if (!cur.success) throw new Error('Not signed in');
+
+    // Try backend alert endpoints if present; else build simple alerts from API checks
+    const alerts = [];
+
+    // Example: nightShiftAlert or presenceVerification endpoints
+    try {
+      const night = await apiService.nightShiftAlert();
+      if (night && Array.isArray(night)) night.slice(0,5).forEach(a => alerts.push({ id: a.id || a.timestamp, title: a.title || a.type || 'Night shift alert', time: a.time || a.timestamp || '', severity: a.severity || 'High' }));
+    } catch (_) {}
+
+    try {
+      const pv = await apiService.presenceVerification();
+      if (pv && Array.isArray(pv)) pv.slice(0,5).forEach(a => alerts.push({ id: a.id || a.timestamp, title: a.title || a.type || 'Presence verification', time: a.time || a.timestamp || '', severity: a.severity || 'Medium' }));
+    } catch (_) {}
+
+    // Fallback: if no alerts returned, show an empty array
+    alertItems.value = alerts.length ? alerts : [];
+  } catch (err) {
+    console.warn('loadAlerts failed', err);
+    toast.error('Unable to load alerts');
+  }
 };
+
+const refresh = async () => {
+  toast.info('Refreshing alerts...');
+  await loadAlerts();
+};
+
+onMounted(loadAlerts);
 </script>
 
 <style scoped>

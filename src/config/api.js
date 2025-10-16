@@ -1,182 +1,287 @@
-// Complete API Configuration - All 87 Endpoints from Postman Collection
-// Aligned with Gotham Time Manager API
-
+// API Configuration aligned with Gotham Time Manager API Documentation
 export const API_CONFIG = {
-  // Base URL Configuration
-  BASE_URL: import.meta.env.VITE_API_BASE_URL || 'https://batman-api-a20b3a37aa3c.herokuapp.com/api',
-  WS_URL: import.meta.env.VITE_WS_URL || 'wss://batman-api-a20b3a37aa3c.herokuapp.com/socket',
+  // In development prefer a relative '/api' so Vite dev server proxy forwards requests and avoids CORS.
+  // In production use the real backend URL.
+  BASE_URL: import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? '/api' : 'https://batman-api-a20b3a37aa3c.herokuapp.com/api'),
+  // WebSocket URL for real-time connections
+  WS_URL: import.meta.env.VITE_WS_URL || (import.meta.env.DEV ? 'ws://localhost:3000' : 'wss://batman-api-a20b3a37aa3c.herokuapp.com'),
   
-  TIMEOUT: 10000,
-  RETRY_ATTEMPTS: 3,
-  
+  // Authentication Headers
   HEADERS: {
+    CONTENT_TYPE: 'Content-Type',
     AUTHORIZATION: 'Authorization',
-    CSRF_TOKEN: 'x-csrf-token',
-    CONTENT_TYPE: 'application/json'
+    CSRF_TOKEN: 'x-xsrf-token',
+    ACCEPT: 'Accept'
   },
 
+  // Comprehensive API Endpoints based on Gotham Time Manager Documentation
   ENDPOINTS: {
-    // 🔐 AUTHENTICATION (4 endpoints)
+    // Authentication APIs
     AUTH: {
-      REGISTER: '/auth/register',           // POST - Register new user
-      LOGIN: '/auth/login',                 // POST - Login and get JWT
-      ME: '/auth/me',                       // GET - Get current user
-      LOGOUT: '/auth/logout'                // POST - Logout
+      SIGN_UP: '/auth/sign_up',               // POST
+      SIGN_IN: '/auth/sign_in',               // POST
+      SIGN_OUT: '/auth/sign_out',             // DELETE
+      GET_CURRENT_USER: '/auth/me',           // GET
     },
 
-    // 👤 USER PROFILE MANAGEMENT (4 endpoints)
-    USER: {
-      PROFILE: '/user/profile',             // GET, PUT - Get/Update profile
-      PASSWORD: '/user/password',           // PUT - Change password
-      DASHBOARD: '/user/dashboard'          // GET - Get user dashboard
-    },
-
-    // 🍕 BREAK MANAGEMENT (6 endpoints)
-    BREAKS: {
-      START: '/user/breaks/start',          // POST - Start break
-      END: '/user/breaks/end',              // POST - End break
-      STATUS: '/user/breaks/status',        // GET - Current break status
-      HISTORY: '/user/breaks/history',      // GET - Break history (paginated)
-      SUMMARY: '/user/breaks/summary'       // GET - Break summary for date
-    },
-
-    // ⏰ TIME TRACKING (7 endpoints)
-    TIME: {
-      CLOCK_IN: '/time/clock-in',           // POST - Clock in
-      CLOCK_OUT: '/time/clock-out',         // POST - Clock out
-      STATUS: '/time/status',               // GET - Current time status
-      ENTRIES: '/time/entries',             // GET - Get time entries (paginated)
-      MANUAL_ENTRY: '/time/manual-entry',   // POST - Create manual entry
-      ENTRY_BY_ID: '/time/entries/:entry_id', // PUT, DELETE - Update/Delete entry
-    },
-
-    // ✅ APPROVAL WORKFLOWS (5 endpoints)
-    APPROVALS: {
-      PENDING: '/approvals/pending',        // GET - Get pending approvals
-      APPROVE: '/approvals/:entry_id/approve',     // PUT - Approve entry
-      REJECT: '/approvals/:entry_id/reject',       // PUT - Reject entry
-      BULK_APPROVE: '/approvals/bulk-approve',     // POST - Bulk approve
-      HISTORY: '/approvals/history'         // GET - Approval history
-    },
-
-    // 📊 ANALYTICS (5 endpoints)
-    ANALYTICS: {
-      OVERVIEW: '/analytics/overview',      // GET - Analytics overview
-      PRODUCTIVITY: '/analytics/productivity', // GET - Productivity metrics
-      ATTENDANCE: '/analytics/attendance',  // GET - Attendance analytics
-      OVERTIME: '/analytics/overtime',      // GET - Overtime analytics
-      TEAM_PERFORMANCE: '/analytics/team-performance' // GET - Team performance
-    },
-
-    // 📈 REPORTS (4 endpoints)
-    REPORTS: {
-      TIMESHEET: '/reports/timesheet',      // GET - Generate timesheet
-      ATTENDANCE: '/reports/attendance',    // GET - Attendance report
-      PRODUCTIVITY: '/reports/productivity', // GET - Productivity report
-      EXPORT: '/reports/export'             // GET - Export reports
-    },
-
-    // ⚙️ SETTINGS (8 endpoints)
-    SETTINGS: {
-      PROFILE: '/settings/profile',         // GET, PUT - Profile settings
-      NOTIFICATIONS: '/settings/notifications', // GET, PUT - Notification settings
-      WORK_PREFERENCES: '/settings/work-preferences', // GET, PUT - Work preferences
-      SYSTEM: '/settings/system'            // GET, PUT - System settings (Admin)
-    },
-
-    // 💰 PAYROLL (5 endpoints)
-    PAYROLL: {
-      SUMMARY: '/payroll/summary',          // GET - Payroll summary
-      HISTORY: '/payroll/history',          // GET - Payroll history
-      GENERATE: '/payroll/generate',        // POST - Generate payroll (Admin)
-      RATES: '/payroll/rates',              // GET - Get pay rates
-      UPDATE_RATES: '/payroll/rates/:user_id' // PUT - Update pay rates (Admin)
-    },
-
-    // 🔔 NOTIFICATIONS (6 endpoints)
-    NOTIFICATIONS: {
-      LIST: '/notifications',               // GET - List notifications
-      UNREAD_COUNT: '/notifications/unread-count', // GET - Unread count
-      MARK_READ: '/notifications/:notification_id/read', // PUT - Mark as read
-      MARK_ALL_READ: '/notifications/mark-all-read', // PUT - Mark all as read
-      DELETE: '/notifications/:notification_id', // DELETE - Delete notification
-      PREFERENCES: '/notifications/preferences' // POST - Update preferences
-    },
-
-    // 👥 USER MANAGEMENT (5 endpoints)
+    // User Management APIs
     USERS: {
-      LIST: '/users',                       // GET - List all users
-      CREATE: '/users',                     // POST - Create user
-      BY_ID: '/users/:user_id',             // GET, PUT, DELETE - Get/Update/Delete user
+      LIST: '/users',                         // GET
+      BY_ID: '/users/:id',                    // GET
+      CREATE: '/users',                       // POST
+      UPDATE: '/users/:id',                   // PUT
+      UPDATE_ROLE: '/users/:id/role',         // PUT
+      DELETE: '/users/:id',                   // DELETE
+      PROFILE: '/user/profile',               // GET, PUT
+      PASSWORD: '/user/password',             // PUT
+      DASHBOARD: '/user/dashboard'            // GET
     },
 
-    // 👨‍👩‍👧‍👦 TEAM MANAGEMENT (3 endpoints)
-    TEAMS: {
-      LIST: '/teams',                       // GET - List teams
-      CREATE: '/teams',                     // POST - Create team
-      ASSIGN_MANAGER: '/teams/:team_id/assign_manager' // PUT - Assign manager
+    // Time Tracking APIs
+    TIME_TRACKING: {
+      CLOCK_IN: '/time-tracking/clock-in',    // POST
+      CLOCK_OUT: '/time-tracking/clock-out',  // POST
+      STATUS: '/time-tracking/status',        // GET
+      ENTRIES: '/time-tracking/entries',      // GET
+      MANUAL_ENTRY: '/time-tracking/manual-entry', // POST
+      UPDATE_ENTRY: '/time-tracking/entries/:id',  // PUT
+      DELETE_ENTRY: '/time-tracking/entries/:id'   // DELETE
     },
 
-    // 📁 PROJECT MANAGEMENT (2 endpoints)
-    PROJECTS: {
-      LIST: '/projects',                    // GET - List projects
-      CREATE: '/projects'                   // POST - Create project
+    // Break Management APIs
+    BREAKS: {
+      START: '/user/breaks/start',            // POST
+      END: '/user/breaks/end',                // POST
+      STATUS: '/user/breaks/status',          // GET
+      HISTORY: '/user/breaks/history',        // GET
+      SUMMARY: '/user/breaks/summary'         // GET
     },
 
-    // ✓ TASK MANAGEMENT (3 endpoints)
-    TASKS: {
-      LIST: '/tasks',                       // GET - List tasks
-      CREATE: '/tasks',                     // POST - Create task
-      UPDATE_STATUS: '/tasks/:task_id/status' // PUT - Update task status
-    },
-
-    // 📅 SCHEDULE MANAGEMENT (3 endpoints)
-    SCHEDULES: {
-      LIST: '/schedules',                   // GET - List schedules
-      CREATE: '/schedules',                 // POST - Create schedule
-      CREATE_BATCH: '/schedules/create_batch' // POST - Batch create schedules
-    },
-
-    // ⏱️ WORKING TIMES (2 endpoints)
+    // Working Times APIs
     WORKING_TIMES: {
-      LIST: '/working_times',               // GET - List working times
-      LOG_UNPAID_OVERTIME: '/logs/overtime/unpaid' // POST - Log unpaid overtime
+      LIST: '/working_times',                 // GET
+      CREATE: '/working_times',               // POST
+      BY_ID: '/working_times/:id',            // GET
+      UPDATE: '/working_times/:id',           // PUT
+      DELETE: '/working_times/:id'            // DELETE
     },
 
-    // Legacy endpoints (for backward compatibility)
-    CLOCKS: {
-      BY_USER: '/clocks/:userID'            // GET, POST
+    // Task Management APIs
+    TASKS: {
+      LIST: '/tasks',                         // GET
+      BY_ID: '/tasks/:id',                    // GET
+      CREATE: '/tasks',                       // POST
+      UPDATE: '/tasks/:id',                   // PUT
+      UPDATE_STATUS: '/tasks/:taskid/status', // PUT
+      DELETE: '/tasks/:id',                   // DELETE
+      ASSIGN_USER: '/tasks/:taskid/user/:userid', // POST
+      REMOVE_USER: '/tasks/:taskid/user/:userid', // DELETE
+      ASSIGNMENTS: '/task_assignments',       // GET, POST
+      ASSIGNMENT_BY_ID: '/task_assignments/:id', // GET, PUT, DELETE
+      SKILLS: '/task_skills',                 // GET, POST
+      SKILL_BY_ID: '/task_skills/:id',        // GET, PUT, DELETE
+      UPDATE_SKILL: '/tasks/:taskid/skills/:skillid' // PUT
     },
-    WORKINGTIME: {
-      BY_USER: '/workingtime/:userID'       // GET
+
+    // Approval APIs
+    APPROVALS: {
+      PENDING: '/approvals/pending',          // GET
+      APPROVE: '/approvals/:id/approve',      // POST
+      REJECT: '/approvals/:id/reject',        // POST
+      BULK_APPROVE: '/approvals/bulk-approve', // POST
+      HISTORY: '/approvals/history'           // GET
     },
+
+
+    // Reports APIs
+    REPORTS: {
+      TIMESHEET: '/reports/timesheet',        // GET
+      ATTENDANCE: '/reports/attendance',      // GET
+      PAYROLL: '/reports/payroll',            // GET
+      OVERTIME: '/reports/overtime',          // GET
+      TURNOVER: '/reports/turnover'           // GET
+    },
+
+    // Compliance & Labor APIs
+    COMPLIANCE: {
+      ISSUES: '/compliance/issues'            // GET
+    },
+
+    LABOR: {
+      DISTRIBUTION: '/labor/distribution'     // GET
+    },
+
+    // Settings APIs
+    SETTINGS: {
+      PROFILE: '/settings/profile',           // GET, PUT
+      NOTIFICATIONS: '/settings/notifications', // GET, PUT
+      WORK_PREFERENCES: '/settings/work-preferences' // GET, PUT
+    },
+
+    // Payroll APIs
+    PAYROLL: {
+      SUMMARY: '/payroll/summary',            // GET
+      HISTORY: '/payroll/history',            // GET
+      GENERATE: '/payroll/generate',          // POST
+      RATES: '/payroll/rates',                // GET
+      UPDATE_RATES: '/payroll/rates/:user_id', // PUT
+      CALCULATION_RATES: '/payroll/calculation/rates', // GET
+      REPORT: '/payroll/report/:id'           // GET
+    },
+
+    // Notifications APIs
+    NOTIFICATIONS: {
+      LIST: '/notifications',                 // GET
+      UNREAD_COUNT: '/notifications/unread-count', // GET
+      MARK_READ: '/notifications/:id/read',   // PUT
+      MARK_ALL_READ: '/notifications/mark-all-read', // PUT
+      DELETE: '/notifications/:id',           // DELETE
+      PREFERENCES: '/notifications/preferences' // POST
+    },
+
+    // Teams & Projects APIs
+    TEAMS: {
+      LIST: '/teams',                         // GET
+      CREATE: '/teams',                       // POST
+      BY_ID: '/teams/:id',                    // GET
+      UPDATE: '/teams/:id',                   // PUT
+      DELETE: '/teams/:id'                    // DELETE
+    },
+
+    PROJECTS: {
+      LIST: '/projects',                      // GET
+      CREATE: '/projects',                    // POST
+      BY_ID: '/projects/:id',                 // GET
+      UPDATE: '/projects/:id',                // PUT
+      DELETE: '/projects/:id'                 // DELETE
+    },
+
+    // Skills Management APIs
+    SKILLS: {
+      LIST: '/skills',                        // GET
+      CREATE: '/skills',                      // POST
+      BY_ID: '/skills/:id',                   // GET
+      UPDATE: '/skills/:id',                  // PUT
+      DELETE: '/skills/:id'                   // DELETE
+    },
+
+    USER_SKILLS: {
+      ASSIGN: '/users/:userid/skills/:skillid', // POST
+      REMOVE: '/users/:userid/skills/:skillid', // DELETE
+      LIST: '/user_skills',                   // GET, POST
+      BY_ID: '/user_skills/:id'               // GET, PUT, DELETE
+    },
+
+    // Schedules & Shifts APIs
+    SCHEDULES: {
+      LIST: '/schedules',                     // GET
+      CREATE: '/schedules',                   // POST
+      CREATE_BATCH: '/schedules/batch',       // POST
+      BY_ID: '/schedules/:id',                // GET
+      UPDATE: '/schedules/:id',               // PUT
+      DELETE: '/schedules/:id',               // DELETE
+      CONSTRAINTS: '/schedules/constraints/:employee_id' // GET
+    },
+
+    SHIFTS: {
+      LIST: '/shifts',                        // GET
+      CREATE: '/shifts',                      // POST
+      BY_ID: '/shifts/:id',                   // GET
+      UPDATE: '/shifts/:id',                  // PUT
+      DELETE: '/shifts/:id'                   // DELETE
+    },
+
+    // Leaves Management APIs
+    LEAVES: {
+      LIST: '/leaves',                        // GET
+      CREATE: '/leaves',                      // POST
+      BY_ID: '/leaves/:id',                   // GET
+      UPDATE: '/leaves/:id',                  // PUT
+      DELETE: '/leaves/:id'                   // DELETE
+    },
+
+    // Roles & Permissions APIs
     ROLES: {
-      LIST: '/roles'                        // GET
+      LIST: '/roles',                         // GET
+      BY_ID: '/roles/:id'                     // GET
     },
+
     PERMISSIONS: {
-      UPDATE: '/permissions/:user_id'       // PUT
+      UPDATE: '/permissions/:user_id',        // PUT
+      DELETE: '/permissions/:user_id'         // DELETE
     },
+
+    // Activities & Logs APIs
+    ACTIVITIES: {
+      BILLABLE: '/activities/billable'        // GET
+    },
+
     LOGS: {
       UNPAID_OVERTIME: '/logs/overtime/unpaid' // POST
     },
-    AUDIT: {
-      NIGHT_SHIFT_ALERT: '/audit/night_shift_alert',
-      PRESENCE_VERIFICATION: '/audit/presence_verification',
-      RESOLVE_DISCREPANCY: '/audit/discrepancy/resolve'
+
+    // Additional Endpoints
+    UNRECOGNIZED_WORKS: {
+      LIST: '/unrecognized_works',             // GET
+      CREATE: '/unrecognized_works',           // POST
+      BY_ID: '/unrecognized_works/:id',        // GET
+      UPDATE: '/unrecognized_works/:id',       // PUT
+      DELETE: '/unrecognized_works/:id'        // DELETE
     },
-    SKILLS: {
-      LIST: '/skills',
-      ASSIGN_TO_USER: '/users/:userid/skills/:skillid',
-      CREATE: '/skills'
+
+    COMPENSATION_LOGS: {
+      LIST: '/compensation_logs',              // GET
+      CREATE: '/compensation_logs',            // POST
+      BY_ID: '/compensation_logs/:id',         // GET
+      UPDATE: '/compensation_logs/:id',        // PUT
+      DELETE: '/compensation_logs/:id'         // DELETE
     },
+
     TIMESHEETS: {
-      VALIDATE: '/timesheets/:id/validate'
+      VALIDATE: '/timesheets/:id/validate'     // PUT
     },
-    INTEGRATIONS: {
-      BATSIGNAL: '/integration/batsignal',
-      LIST: '/integrations'
+
+    AUDIT: {
+      NIGHT_SHIFT_ALERT: '/audit/night_shift_alert',        // GET
+      PRESENCE_VERIFICATION: '/audit/presence_verification', // GET
+      DISCREPANCY_RESOLVE: '/audit/discrepancy/resolve'     // POST
+    },
+
+    INTEGRATION: {
+      BATSIGNAL: '/integration/batsignal',     // POST
+      LIST: '/integrations',                   // GET
+      CREATE: '/integrations',                 // POST
+      BY_ID: '/integrations/:id',              // GET
+      UPDATE: '/integrations/:id',             // PUT
+      DELETE: '/integrations/:id'              // DELETE
     }
-  }
+  },
+
+  // Response Status Codes
+  STATUS_CODES: {
+    OK: 200,
+    CREATED: 201,
+    NO_CONTENT: 204,
+    BAD_REQUEST: 400,
+    UNAUTHORIZED: 401,
+    FORBIDDEN: 403,
+    NOT_FOUND: 404,
+    UNPROCESSABLE_ENTITY: 422,
+    INTERNAL_SERVER_ERROR: 500
+  },
+
+  // Error Types
+  ERROR_TYPES: {
+    ALREADY_CLOCKED_IN: 'already_clocked_in',
+    VALIDATION_ERROR: 'validation_error',
+    UNAUTHORIZED: 'Unauthorized access',
+    FORBIDDEN: 'Access denied',
+    INTERNAL_SERVER_ERROR: 'Internal Server Error'
+  },
+
+  // Request Configuration
+  TIMEOUT: 10000,
+  RETRY_ATTEMPTS: 3
 };
 
 // Helper function to build full API URLs
@@ -193,48 +298,28 @@ export const replacePathParams = (endpoint, params = {}) => {
   return url;
 };
 
+// Helper function to get user endpoints
+export const getUserEndpoint = (key) => buildApiUrl(API_CONFIG.ENDPOINTS.USERS[key]);
+
+// Helper function to get time tracking endpoints
+export const getTimeTrackingEndpoint = (key) => buildApiUrl(API_CONFIG.ENDPOINTS.TIME_TRACKING[key]);
+
+// Helper function to replace URL parameters
+export const replaceUrlParams = (url, params) => {
+  let result = url;
+  Object.keys(params).forEach(key => {
+    result = result.replace(`:${key}`, params[key]);
+  });
+  return result;
+};
+
 // Helper function to build query string
-export const buildQueryString = (params = {}) => {
-  const filtered = Object.entries(params).filter(([_, v]) => v !== null && v !== undefined);
-  if (filtered.length === 0) return '';
-  return '?' + new URLSearchParams(filtered).toString();
+export const buildQueryString = (params) => {
+  const query = new URLSearchParams();
+  Object.keys(params).forEach(key => {
+    if (params[key] !== null && params[key] !== undefined) {
+      query.append(key, params[key]);
+    }
+  });
+  return query.toString();
 };
-
-// Task status constants
-export const TASK_STATUS = {
-  TODO: 1,
-  IN_PROGRESS: 2,
-  UNDER_REVIEW: 3,
-  DONE: 4
-};
-
-export const TASK_STATUS_LABELS = {
-  1: 'To Do',
-  2: 'In Progress',
-  3: 'Under Review',
-  4: 'Done'
-};
-
-// Approval status constants
-export const APPROVAL_STATUS = {
-  PENDING: 'pending',
-  APPROVED: 'approved',
-  REJECTED: 'rejected'
-};
-
-// Break types
-export const BREAK_TYPES = {
-  REGULAR: 'regular',
-  LUNCH: 'lunch',
-  PERSONAL: 'personal'
-};
-
-// Report formats
-export const REPORT_FORMATS = {
-  PDF: 'pdf',
-  EXCEL: 'excel',
-  CSV: 'csv'
-};
-
-export default API_CONFIG;
-

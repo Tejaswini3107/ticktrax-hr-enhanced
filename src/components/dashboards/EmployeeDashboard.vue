@@ -55,20 +55,47 @@ const normalizeEntry = (raw) => {
   const dateRaw = raw.date || raw.start_date || raw.day || '';
   const clockInRaw = raw.start_time || raw.clock_in || raw.in || '';
   const clockOutRaw = raw.end_time || raw.clock_out || raw.out || '';
+
+  // Parse possible date and time fields into timestamps
   const parsedDate = dateRaw ? new Date(dateRaw) : null;
-  const parsedTs = parsedDate && !isNaN(parsedDate.getTime()) ? parsedDate.getTime() : null;
-  const date = parsedTs ? formatIsoToLocal(parsedDate) : (dateRaw || '');
-  const clockIn = (clockInRaw && clockInRaw.includes('T')) ? formatIsoToLocal(clockInRaw) : (clockInRaw || '');
-  const clockOut = (clockOutRaw && clockOutRaw.includes('T')) ? formatIsoToLocal(clockOutRaw) : (clockOutRaw || '');
-  const hours = Number(raw.hours || raw.duration_hours || raw.duration || 0);
+  const parsedDateTs = parsedDate && !isNaN(parsedDate.getTime()) ? parsedDate.getTime() : null;
+
+  const inDate = clockInRaw ? new Date(clockInRaw) : null;
+  const outDate = clockOutRaw ? new Date(clockOutRaw) : null;
+  const inTs = inDate && !isNaN(inDate.getTime()) ? inDate.getTime() : null;
+  const outTs = outDate && !isNaN(outDate.getTime()) ? outDate.getTime() : null;
+
+  // Prefer parsed date for the entry date, otherwise keep raw
+  const date = parsedDateTs ? formatIsoToLocal(parsedDate) : (dateRaw || '');
+
+  // Format clock in/out for display if parsable ISO-like; otherwise use raw
+  const clockIn = inTs ? formatIsoToLocal(inDate) : (clockInRaw || '');
+  const clockOut = outTs ? formatIsoToLocal(outDate) : (clockOutRaw || '');
+
+  // Compute hours from timestamps when possible, else fall back to raw fields
+  let hoursNum = Number(raw.hours ?? raw.duration_hours ?? raw.duration ?? 0);
+  if (inTs && outTs && outTs > inTs) {
+    hoursNum = (outTs - inTs) / (1000 * 60 * 60); // milliseconds -> hours
+  }
+
   const status = raw.status || (raw.approved ? 'approved' : raw.pending_approval ? 'pending' : 'pending');
-  return { date, clockIn, clockOut, hours: String(hours), status, _ts: parsedTs };
+
+  // _ts is used for sorting: prefer inTs, then outTs, then parsedDateTs
+  const sortTs = inTs || outTs || parsedDateTs || 0;
+
+  return { date, clockIn, clockOut, hours: String(Number(hoursNum.toFixed(2))), status, _ts: sortTs, _in_ts: inTs, _out_ts: outTs };
 };
 
 const computeStats = (entries) => {
   const now = new Date();
+  // Week is Monday -> Sunday. Compute startOfWeek as the most recent Monday at 00:00.
+  const day = now.getDay(); // 0 = Sun, 1 = Mon, ... 6 = Sat
+  const daysSinceMonday = (day + 6) % 7; // 0 when Monday, 1 when Tuesday, ..., 6 when Sunday
   const startOfWeek = new Date(now);
-  startOfWeek.setDate(now.getDate() - now.getDay());
+  startOfWeek.setHours(0,0,0,0);
+  startOfWeek.setDate(now.getDate() - daysSinceMonday);
+  const startOfNextWeek = new Date(startOfWeek);
+  startOfNextWeek.setDate(startOfWeek.getDate() + 7);
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
   let weekHours = 0;
@@ -80,7 +107,7 @@ const computeStats = (entries) => {
     const d = ts ? new Date(ts) : new Date(e.date);
     const h = Number(e.hours) || 0;
     if (!isNaN(d.getTime())) {
-      if (d >= startOfWeek) weekHours += h;
+      if (d >= startOfWeek && d < startOfNextWeek) weekHours += h;
       if (d >= startOfMonth) monthHours += h;
     }
     if (e.status !== 'approved') pending += 1;
@@ -97,17 +124,71 @@ const loadDashboard = async () => {
   isLoading.value = true;
   loadError.value = null;
   try {
-    const userRes = await authManager.getCurrentUser();
-    const user = userRes?.data;
-    if (!user || !user.id) throw new Error('No authenticated user');
-    const data = await apiService.getUserWorkingTimes(user.id);
-    const entries = Array.isArray(data) ? data : (data?.data || []);
-    const normalized = entries.map(normalizeEntry).sort((a,b) => (a.date < b.date ? 1 : -1));
-    recentEntries.value = normalized.slice(0, 10);
-    computeStats(normalized);
+    if (!authManager.isAuthenticated()) {
+      console.log('🚀 User not authenticated, skipping dashboard load');
+      return;
+    }
+
+    // Load dashboard analytics using new API
+    const analyticsData = await apiService.getDashboardAnalytics({
+      start_date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days ago
+      end_date: new Date().toISOString().split('T')[0] // today
+    });
+
+    // Load recent time entries
+    const timeEntries = await apiService.getTimeEntries({
+      start_date: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 7 days ago
+      end_date: new Date().toISOString().split('T')[0], // today
+      limit: 10
+    });
+
+    // Update recent entries
+    if (timeEntries && timeEntries.data) {
+      const entries = Array.isArray(timeEntries.data) ? timeEntries.data : [];
+      recentEntries.value = entries.map(entry => ({
+        id: entry.id,
+        clock_in: entry.clock_in,
+        clock_out: entry.clock_out,
+        total_hours: entry.total_hours,
+        work_location: entry.work_location,
+        status: entry.status,
+        _ts: new Date(entry.clock_in).getTime()
+      }));
+    }
+
+    // Update stats with analytics data
+    if (analyticsData && analyticsData.data) {
+      stats.value = [
+        { 
+          label: 'Hours This Week', 
+          value: analyticsData.data.weekly_hours?.toFixed(1) || '0', 
+          icon: TrendingUp 
+        },
+        { 
+          label: 'Hours This Month', 
+          value: analyticsData.data.total_hours?.toFixed(1) || '0', 
+          icon: Calendar 
+        },
+        { 
+          label: 'Attendance Rate', 
+          value: `${analyticsData.data.attendance_rate?.toFixed(1) || '0'}%`, 
+          icon: AlertCircle 
+        },
+      ];
+    }
+
+    console.log('📊 Dashboard loaded:', { analyticsData, timeEntries });
   } catch (err) {
-    console.error('Load dashboard failed', err);
+    console.error('Load dashboard failed:', err);
     loadError.value = err.message || String(err);
+    
+    // Fallback to empty state
+    recentEntries.value = [];
+    stats.value = [
+      { label: 'Hours This Week', value: '0', icon: TrendingUp },
+      { label: 'Hours This Month', value: '0', icon: Calendar },
+      { label: 'Pending Entries', value: '0', icon: AlertCircle },
+    ];
   } finally {
     isLoading.value = false;
   }

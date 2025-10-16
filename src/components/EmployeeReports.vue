@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import Card from './ui/card.vue';
 import { CardContent, CardHeader, CardTitle } from './ui/card-components.vue';
 import Button from './ui/button.vue';
@@ -50,121 +50,237 @@ import {
   FileText,
   Target,
 } from 'lucide-vue-next';
-import { useToast } from './ui/toast/use-toast.js';
-
-const { toast } = useToast();
+// using the local toast utility
 
 const selectedPeriod = ref('month');
 const startDate = ref('');
 const endDate = ref('');
 
 // Mock data for charts
-const weeklyHoursData = {
-  labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
-  datasets: [
-    {
-      label: 'Regular Hours',
-      data: [42, 40, 45, 38],
-      backgroundColor: '#3b82f6',
-    },
-    {
-      label: 'Overtime',
-      data: [2, 0, 5, 0],
-      backgroundColor: '#f59e0b',
-    },
-  ],
-};
+import apiService from '../services/apiService.js';
+import authManager from '../services/authService.js';
+import toast from '../utils/toast.js';
 
-const projectHoursData = {
-  labels: ['Alpha', 'Beta', 'Gamma', 'Delta'],
-  datasets: [
-    {
-      label: 'Hours',
-      data: [45, 32, 28, 23],
-      backgroundColor: ['#3b82f6', '#8b5cf6', '#06b6d4', '#10b981'],
-    },
-  ],
-};
+const weeklyHoursData = ref({ labels: [], datasets: [] });
+const projectHoursData = ref({ labels: [], datasets: [] });
+const workLocationData = ref({ labels: [], datasets: [] });
+const monthlyTrendsData = ref({ labels: [], datasets: [] });
+const pieChartColors = ['#3b82f6', '#8b5cf6', '#06b6d4', '#10b981'];
 
-const workLocationData = {
-  labels: ['Work from Home', 'WFO', 'Field Work', 'Warehouse Visit'],
-  datasets: [
-    {
-      label: 'Hours',
-      data: [58, 39, 26, 6],
-      backgroundColor: ['#3b82f6', '#8b5cf6', '#06b6d4', '#10b981'],
-    },
-  ],
-};
+const summaryStats = ref({
+  totalHours: 0,
+  regularHours: 0,
+  overtimeHours: 0,
+  averageDaily: 0,
+  punctualityScore: 0,
+  projectsWorked: 0,
+});
 
-const monthlyTrendsData = {
-  labels: ['Jul', 'Aug', 'Sep', 'Oct'],
-  datasets: [
-    {
-      label: 'Regular Hours',
-      data: [160, 168, 164, 152],
-      borderColor: '#3b82f6',
-      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-      fill: true,
-    },
-    {
-      label: 'Overtime',
-      data: [8, 4, 12, 6],
-      borderColor: '#f59e0b',
-      backgroundColor: 'rgba(245, 158, 11, 0.1)',
-      fill: true,
-    },
-  ],
-};
+const detailedTimeEntries = ref([]);
 
-const pieChartColors = [
-  '#3b82f6',
-  '#8b5cf6',
-  '#06b6d4',
-  '#10b981',
-];
+const formatIso = (iso) => {
+  if (!iso) return '';
+  try { return iso.split('T')[0]; } catch (_) { return iso; }
+}
 
-const summaryStats = {
-  totalHours: 342,
-  regularHours: 312,
-  overtimeHours: 30,
-  averageDaily: 8.2,
-  punctualityScore: 94,
-  projectsWorked: 4,
-};
+const loadReportData = async () => {
+  try {
+    const cur = await authManager.getCurrentUser();
+    if (!cur.success) throw new Error('Not signed in');
+    const user = cur.data;
+    // Prefer server-side payroll/report aggregation when available.
+    // Try the payroll report endpoint first (may return totals, rows or a data wrapper).
+    let payrollResp = null;
+    let rows = [];
+    try {
+      payrollResp = await apiService.getPayrollReport(user.id, {
+        period: selectedPeriod.value,
+        start: startDate.value || undefined,
+        end: endDate.value || undefined,
+      });
 
-const detailedTimeEntries = [
-  {
-    date: '2025-10-01',
-    project: 'Project Alpha',
-    clockIn: '09:00 AM',
-    clockOut: '05:30 PM',
-    regular: 8,
-    overtime: 0.5,
-    total: 8.5,
-    status: 'approved',
-  },
-  {
-    date: '2025-09-30',
-    project: 'Project Beta',
-    clockIn: '08:45 AM',
-    clockOut: '05:15 PM',
-    regular: 8,
-    overtime: 0.5,
-    total: 8.5,
-    status: 'approved',
-  },
-  {
-    date: '2025-09-29',
-    project: 'Project Gamma',
-    clockIn: '09:15 AM',
-    clockOut: '06:00 PM',
-    regular: 8,
-    overtime: 0.75,
-    total: 8.75,
-    status: 'pending',
-  },
-];
+      // payrollResp may be an array of rows, or an object with { rows, data, totals }
+      if (Array.isArray(payrollResp)) {
+        rows = payrollResp;
+      } else if (payrollResp?.rows && Array.isArray(payrollResp.rows)) {
+        rows = payrollResp.rows;
+      } else if (payrollResp?.data && Array.isArray(payrollResp.data)) {
+        rows = payrollResp.data;
+      } else if (payrollResp?.items && Array.isArray(payrollResp.items)) {
+        rows = payrollResp.items;
+      } else {
+        // unexpected shape - fallback to working times endpoint
+        payrollResp = null;
+        const data = await apiService.getUserWorkingTimes(user.id);
+        rows = Array.isArray(data) ? data : (data?.data || []);
+      }
+    } catch (e) {
+      // payroll endpoint may not exist on some backends; fallback to raw working times
+      console.warn('Payroll report API failed, falling back to working times:', e);
+      const data = await apiService.getUserWorkingTimes(user.id);
+      rows = Array.isArray(data) ? data : (data?.data || []);
+    }
+    // Normalize rows into a consistent shape so charts consume a predictable model
+    const normalized = rows.map(r => {
+      const startRaw = r.start_time || r.started_at || r.timestamp || r.date || r.start || '';
+      const endRaw = r.end_time || r.ended_at || r.stopped_at || r.stop_time || r.end || r.updated_at || '';
+
+      const makeIsoDate = (s) => {
+        if (!s) return '';
+        try { return new Date(s).toISOString().split('T')[0]; } catch (_) { return String(s).split('T')[0] || ''; }
+      };
+
+      const computeEntryHours = (t) => {
+        if (!t) return 0;
+        const hourFields = [t.duration_hours, t.hours, t.regular_hours, t.total_hours, t.duration, t.hours_total];
+        for (const v of hourFields) {
+          const n = Number(v);
+          if (!isNaN(n) && n !== 0) return n;
+        }
+        const minuteFields = [t.duration_minutes, t.minutes, t.total_minutes];
+        for (const v of minuteFields) {
+          const n = Number(v);
+          if (!isNaN(n) && n !== 0) return n / 60;
+        }
+        // fallback to start/end timestamps
+        if (!startRaw) return 0;
+        const sd = new Date(startRaw);
+        if (isNaN(sd)) return 0;
+        let ed = endRaw ? new Date(endRaw) : null;
+        if ((!ed || isNaN(ed)) && (r.status === 'running' || r.status === 'in_progress' || r.active)) ed = new Date();
+        if (!ed || isNaN(ed)) return 0;
+        const diff = (ed.getTime() - sd.getTime()) / (1000 * 60 * 60);
+        return diff > 0 ? Math.round(diff * 100) / 100 : 0;
+      };
+
+      const dateIso = makeIsoDate(startRaw) || makeIsoDate(r.date) || '';
+
+      return {
+        raw: r,
+        date: dateIso,
+        start: startRaw || '',
+        end: endRaw || '',
+        project: r.project || r.task || '—',
+        clockIn: r.clock_in || startRaw || '',
+        clockOut: r.clock_out || endRaw || '',
+        regular: Number(r.regular_hours || r.regular || 0) || 0,
+        overtime: Number(r.overtime_hours || 0) || 0,
+        total: Number(r.duration_hours || r.hours || computeEntryHours(r)) || 0,
+        location: r.location || r.site || r.type || 'Unknown',
+        status: r.status || (r.approved ? 'approved' : (r.pending_approval ? 'pending' : 'unknown')),
+      };
+    });
+
+    detailedTimeEntries.value = normalized.map(n => ({
+      date: formatIso(n.start || n.date),
+      project: n.project,
+      clockIn: n.clockIn,
+      clockOut: n.clockOut,
+      regular: n.regular,
+      overtime: n.overtime,
+      total: n.total,
+      status: n.status,
+    }));
+
+    // --- Build chart data ---
+    const today = new Date();
+    const last7 = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      last7.push(d.toISOString().split('T')[0]);
+    }
+
+    // Weekly totals
+    const regularByDay = {}; const overtimeByDay = {};
+    last7.forEach(d => { regularByDay[d] = 0; overtimeByDay[d] = 0; });
+
+    normalized.forEach(n => {
+      const dt = n.date || (n.start ? (new Date(n.start).toISOString().split('T')[0]) : '');
+      if (!dt) return;
+      if (!last7.includes(dt)) return;
+      regularByDay[dt] = (regularByDay[dt] || 0) + (Number(n.regular) || 0);
+      overtimeByDay[dt] = (overtimeByDay[dt] || 0) + (Number(n.overtime) || 0);
+      // if regular/overtime not present, attribute total to regular as fallback
+      if ((!n.regular || Number(n.regular) === 0) && (!n.overtime || Number(n.overtime) === 0)) {
+        regularByDay[dt] += Number(n.total || 0);
+      }
+    });
+
+    weeklyHoursData.value = {
+      labels: last7.slice(),
+      datasets: [
+        { label: 'Regular Hours', data: last7.map(d => Number((regularByDay[d] || 0).toFixed(2))), backgroundColor: '#3b82f6' },
+        { label: 'Overtime', data: last7.map(d => Number((overtimeByDay[d] || 0).toFixed(2))), backgroundColor: '#f59e0b' },
+      ]
+    };
+
+    // Work location: aggregate total hours per location across last 7 days and show average per day
+    const locTotals = {};
+    const normalizeLoc = (l) => {
+      if (!l) return 'Unspecified';
+      const s = String(l).trim();
+      if (!s || /^unknown$/i.test(s)) return 'Unspecified';
+      return s;
+    };
+
+    normalized.forEach(n => {
+      const dt = n.date || (n.start ? (new Date(n.start).toISOString().split('T')[0]) : '');
+      if (!dt || !last7.includes(dt)) return;
+      const loc = normalizeLoc(n.location);
+      locTotals[loc] = (locTotals[loc] || 0) + Number(n.total || 0);
+    });
+    const daysCount = last7.length || 1;
+    const locAvgPerDay = {};
+    Object.keys(locTotals).forEach(loc => { locAvgPerDay[loc] = Number((locTotals[loc] / daysCount).toFixed(2)); });
+    workLocationData.value = {
+      labels: Object.keys(locAvgPerDay),
+      datasets: [{ label: 'Avg Hours/Day', data: Object.values(locAvgPerDay), backgroundColor: pieChartColors.slice(0, Object.keys(locAvgPerDay).length) }]
+    };
+
+    // Monthly trends (last 6 months)
+    const months = []; const monthTotals = {};
+    for (let m = 5; m >= 0; m--) {
+      const d = new Date(); d.setMonth(d.getMonth() - m);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      months.push(key); monthTotals[key] = 0;
+    }
+    normalized.forEach(n => {
+      const s = n.start || n.date || '';
+      if (!s) return;
+      const key = (new Date(s)).toISOString().slice(0,7);
+      if (monthTotals.hasOwnProperty(key)) monthTotals[key] += Number(n.total || 0);
+    });
+    monthlyTrendsData.value = {
+      labels: months.map(m => {
+        const [y, mm] = m.split('-'); const d = new Date(Number(y), Number(mm)-1, 1);
+        return d.toLocaleString(undefined, { month: 'short', year: 'numeric' });
+      }),
+      datasets: [{ label: 'Hours', data: months.map(m => Number((monthTotals[m] || 0).toFixed(2))), backgroundColor: '#3b82f6' }]
+    };
+
+    const total = normalized.reduce((s,n) => s + Number(n.total || 0), 0);
+    const regular = normalized.reduce((s,n) => s + Number(n.regular || 0), 0);
+    const overtime = normalized.reduce((s,n) => s + Number(n.overtime || 0), 0);
+    summaryStats.value = {
+      totalHours: Number(total.toFixed(2)),
+      regularHours: Number(regular.toFixed(2)),
+      overtimeHours: Number(overtime.toFixed(2)),
+      averageDaily: (total / Math.max(1, 22)).toFixed(2),
+      punctualityScore: 90,
+      projectsWorked: new Set(normalized.map(n => n.project)).size,
+    };
+  } catch (err) {
+    console.error('Load report data failed', err);
+    toast.error('Failed to load report data');
+  }
+}
+
+onMounted(loadReportData);
+
+const hasWorkLocationData = computed(() => {
+  return Array.isArray(workLocationData.value?.labels) && workLocationData.value.labels.length > 0 && Array.isArray(workLocationData.value?.datasets) && workLocationData.value.datasets.length > 0;
+});
 
 const handleExportReport = (format) => {
   toast({
@@ -199,7 +315,7 @@ const periodLabel = computed(() => {
           View your time tracking reports and analytics
         </p>
       </div>
-      <div class="flex items-center gap-2">
+      <!-- <div class="flex items-center gap-2">
         <Select v-model="selectedPeriod">
           <SelectTrigger class="w-40">
             <Calendar class="h-4 w-4 mr-2" />
@@ -221,7 +337,7 @@ const periodLabel = computed(() => {
           <Download class="h-4 w-4" />
           Export PDF
         </Button>
-      </div>
+      </div> -->
     </div>
 
     <Card v-if="selectedPeriod === 'custom'">
@@ -250,10 +366,10 @@ const periodLabel = computed(() => {
             <div>
               <p class="text-sm text-muted-foreground">Total Hours</p>
               <p class="text-2xl mt-1">{{ summaryStats.totalHours }}h</p>
-              <p class="text-xs text-muted-foreground mt-1">
+              <!-- <p class="text-xs text-muted-foreground mt-1">
                 Regular: {{ summaryStats.regularHours }}h | OT:
                 {{ summaryStats.overtimeHours }}h
-              </p>
+              </p> -->
             </div>
             <Clock class="h-8 w-8 text-primary" />
           </div>
@@ -265,15 +381,15 @@ const periodLabel = computed(() => {
             <div>
               <p class="text-sm text-muted-foreground">Daily Average</p>
               <p class="text-2xl mt-1">{{ summaryStats.averageDaily }}h</p>
-              <p class="text-xs text-green-600 mt-1">
+              <!-- <p class="text-xs text-green-600 mt-1">
                 +0.2h from last period
-              </p>
+              </p> -->
             </div>
             <TrendingUp class="h-8 w-8 text-green-500" />
           </div>
         </CardContent>
       </Card>
-      <Card>
+      <!-- <Card>
         <CardContent class="pt-6">
           <div class="flex items-center justify-between">
             <div>
@@ -286,7 +402,7 @@ const periodLabel = computed(() => {
             <Target class="h-8 w-8 text-blue-500" />
           </div>
         </CardContent>
-      </Card>
+      </Card> -->
     </div>
 
     <Tabs defaultValue="overview" class="w-full">
@@ -300,7 +416,7 @@ const periodLabel = computed(() => {
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card>
             <CardHeader>
-              <CardTitle>Weekly Hours Breakdown</CardTitle>
+              <CardTitle>Weekly Hours (Last 7 Days)</CardTitle>
             </CardHeader>
             <CardContent>
               <div class="w-full h-[300px]">
@@ -313,13 +429,22 @@ const periodLabel = computed(() => {
 
           <Card>
             <CardHeader>
-              <CardTitle>Work Overview</CardTitle>
+              <CardTitle>Work Locations (Avg Hours/Day)</CardTitle>
             </CardHeader>
             <CardContent>
-              <div class="w-full h-[300px] rounded-[12px]">
-                <ResponsiveContainer width="70%" height="100%">
-                  <PieChart :data="workLocationData" />
-                </ResponsiveContainer>
+              <div class="w-full h-[300px] rounded-[12px] flex items-center justify-center">
+                <template v-if="hasWorkLocationData">
+                  <div class="w-full h-full flex items-center justify-center">
+                    <ResponsiveContainer width="70%" height="100%">
+                      <PieChart :data="workLocationData" />
+                    </ResponsiveContainer>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="text-center text-sm text-muted-foreground">
+                    No work location data for the selected period.
+                  </div>
+                </template>
               </div>
             </CardContent>
           </Card>

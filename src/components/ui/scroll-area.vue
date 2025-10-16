@@ -31,11 +31,25 @@ export const ScrollArea = {
     return () => h(ScrollAreaRoot, {
       class: cn('relative overflow-hidden', props.class),
       ...delegatedProps.value
-    }, [
-      h(ScrollAreaViewport, { class: 'h-full w-full rounded-[inherit]' }, slots.default),
-      h(ScrollBar),
-      h(ScrollAreaCorner)
-    ]);
+    }, {
+      default: () => [
+        h(ScrollAreaViewport, { class: 'h-full w-full rounded-[inherit]' }, {
+          default: slots.default
+        }),
+        h(ScrollAreaScrollbar, {
+          class: cn(
+            'flex touch-none select-none transition-colors',
+            props.orientation === 'vertical'
+              && 'h-full w-2.5 border-l border-l-transparent p-px',
+            props.orientation === 'horizontal'
+              && 'h-2.5 flex-col border-t border-t-transparent p-px'
+          )
+        }, {
+          default: () => h(ScrollAreaThumb, { class: 'relative flex-1 rounded-full bg-border' })
+        }),
+        h(ScrollAreaCorner)
+      ]
+    });
   }
 };
 

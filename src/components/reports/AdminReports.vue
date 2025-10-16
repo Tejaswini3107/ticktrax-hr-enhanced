@@ -40,16 +40,12 @@ import {
   TabsTrigger,
 } from '../ui/tabs.vue';
 
-const workforceAnalytics = [
-  { month: 'Apr', totalHours: 7200, overtime: 320, efficiency: 85 },
-  { month: 'May', totalHours: 7450, overtime: 380, efficiency: 87 },
-  { month: 'Jun', totalHours: 7800, overtime: 450, efficiency: 89 },
-  { month: 'Jul', totalHours: 7650, overtime: 420, efficiency: 88 },
-  { month: 'Aug', totalHours: 7900, overtime: 480, efficiency: 91 },
-  { month: 'Sep', totalHours: 8100, overtime: 520, efficiency: 92 },
-];
+import { ref, onMounted, computed } from 'vue';
+import apiService from '../../services/apiService.js';
 
-const departmentPerformance = [
+const workforceAnalytics = ref([]);
+
+const departmentPerformance = ref([
   {
     dept: 'Production',
     employees: 45,
@@ -85,9 +81,9 @@ const departmentPerformance = [
     efficiency: 93,
     utilization: 88,
   },
-];
+]);
 
-const complianceData = [
+const complianceData = ref([
   {
     metric: 'Time Policy Violations',
     value: 2,
@@ -108,9 +104,9 @@ const complianceData = [
     status: 'warning',
     target: 0,
   },
-];
+]);
 
-const workforceData = [
+const workforceData = ref([
   {
     month: 'Apr',
     hires: 3,
@@ -153,23 +149,181 @@ const workforceData = [
     netChange: 2,
     retention: 98,
   },
-];
+]);
 
-const shiftDistribution = [
-  { hour: '6 AM', employees: 12 },
-  { hour: '7 AM', employees: 35 },
-  { hour: '8 AM', employees: 68 },
-  { hour: '9 AM', employees: 85 },
-  { hour: '10 AM', employees: 92 },
-  { hour: '11 AM', employees: 95 },
-  { hour: '12 PM', employees: 88 },
-  { hour: '1 PM', employees: 90 },
-  { hour: '2 PM', employees: 93 },
-  { hour: '3 PM', employees: 89 },
-  { hour: '4 PM', employees: 75 },
-  { hour: '5 PM', employees: 45 },
-  { hour: '6 PM', employees: 25 },
-];
+// Will be populated with the top 7 employees by hours for the current week
+const shiftDistribution = ref([]);
+// debug info to help diagnose empty chart
+const shiftDebug = ref({ sampleCount: 0, allRows: 0, perUserCount: 0, weekStart: '', weekEnd: '', entries: [] });
+
+const totalEmployees = ref(0);
+const monthlyHours = ref(0);
+const complianceIssues = ref(0);
+
+const loadAdminReports = async () => {
+  try {
+    const users = await apiService.listUsers();
+    const userArray = Array.isArray(users) ? users : (users?.data || []);
+    totalEmployees.value = userArray.length;
+
+    // Compute monthly hours by sampling up to 50 users to avoid heavy processing
+    let monthHours = 0;
+    const sample = userArray.slice(0, 50);
+    const now = new Date();
+    const month = now.getMonth();
+    const year = now.getFullYear();
+
+    await Promise.all(sample.map(async (u) => {
+      try {
+        const uid = u.id || u.attributes?.id;
+        if (!uid) return;
+        const times = await apiService.getUserWorkingTimes(uid);
+        const rows = Array.isArray(times) ? times : (times?.data || []);
+        for (const r of rows) {
+          const start = r.start_time || r.timestamp || '';
+          const d = start ? new Date(start) : null;
+          if (d && d.getMonth() === month && d.getFullYear() === year) {
+            monthHours += Number(r.duration_hours || r.hours || 0) || 0;
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    }));
+
+    monthlyHours.value = Math.round(monthHours);
+    // simple heuristic for compliance issues: count 'pending' or 'missing_clock_out' in working time rows (sampled)
+    let issues = 0;
+    for (const u of sample) {
+      try {
+        const uid = u.id || u.attributes?.id;
+        if (!uid) continue;
+        const rows = await apiService.getUserWorkingTimes(uid);
+        const arr = Array.isArray(rows) ? rows : (rows?.data || []);
+        issues += arr.filter(r => r.status === 'missing_clock_out' || r.status === 'violation' || r.pending_approval).length;
+      } catch (e) {}
+    }
+    complianceIssues.value = issues;
+
+    // Build simple workforceAnalytics: last 6 months totals (client-side estimation)
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(); d.setMonth(d.getMonth() - i);
+      months.push({ month: d.toLocaleString('en-US', { month: 'short' }), totalHours: 0, overtime: 0, efficiency: 0 });
+    }
+  // aggregate sample rows into months buckets and annotate with user id/name
+  const allRows = [];
+  shiftDebug.value.sampleCount = sample.length;
+    for (const u of sample) {
+      try {
+        const uid = u.id || u.attributes?.id;
+        if (!uid) continue;
+        const rows = await apiService.getUserWorkingTimes(uid);
+        const arr = Array.isArray(rows) ? rows : (rows?.data || []);
+        // annotate each row with the user's first name so chart shows first name only
+        const firstNameCandidate = u.first_name || u.attributes?.first_name || u.name || u.attributes?.name || u.email || u.attributes?.email || `User ${uid}`;
+        const firstName = (typeof firstNameCandidate === 'string' && firstNameCandidate.trim())
+          ? firstNameCandidate.trim().split(' ')[0]
+          : `User ${uid}`;
+        allRows.push(...arr.map(r => ({ ...r, __uid: uid, __firstName: firstName })));
+      } catch (e) {}
+    }
+    for (const r of allRows) {
+  const start = r.start_time || r.timestamp || '';
+  const d = parseTimestamp(start);
+      if (!d) continue;
+      const mLabel = d.toLocaleString('en-US', { month: 'short' });
+      const m = months.find(x => x.month === mLabel);
+      const hours = Number(r.duration_hours || r.hours || 0) || 0;
+      if (m) {
+        m.totalHours += hours;
+        if (r.overtime) m.overtime += hours;
+      }
+    }
+    // --- New: compute top 7 employees by hours for the current week (Monday -> Sunday)
+    try {
+      const now = new Date();
+      const day = now.getDay();
+      // compute Monday as start of week (local)
+      const diffToMonday = (day + 6) % 7; // 0->Mon
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - diffToMonday);
+      weekStart.setHours(0, 0, 0, 0);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 7);
+
+      const perUser = new Map();
+      for (const r of allRows) {
+  const start = r.start_time || r.timestamp || r.created_at || r.start || r.date || '';
+  const s = parseTimestamp(start);
+        if (!s) continue;
+        if (s >= weekStart && s < weekEnd) {
+          const uid = r.__uid || (r.user_id || r.user?.id);
+          // prefer the annotated first name, otherwise extract from attached user info
+          const nameSource = r.__firstName || r.__name || r.user_name || r.user?.name || r.user?.first_name || `User ${uid}`;
+          const name = (typeof nameSource === 'string' && nameSource.trim()) ? nameSource.trim().split(' ')[0] : `User ${uid}`;
+          const h = Number(r.duration_hours || r.hours || r.duration || (r.minutes ? r.minutes / 60 : 0)) || 0;
+          const prev = perUser.get(uid) || { name, hours: 0 };
+          prev.hours += h;
+          perUser.set(uid, prev);
+        }
+      }
+
+      const topArr = Array.from(perUser.values()).sort((a, b) => b.hours - a.hours).slice(0, 7);
+  // populate debug info
+  shiftDebug.value.allRows = allRows.length;
+  shiftDebug.value.perUserCount = perUser.size;
+  shiftDebug.value.weekStart = weekStart.toISOString();
+  shiftDebug.value.weekEnd = weekEnd.toISOString();
+    shiftDebug.value.entries = Array.from(perUser.entries()).map(([uid, v]) => ({ uid, name: v.name, hours: Math.round((v.hours + Number.EPSILON) * 100) / 100 }));
+      // populate shiftDistribution with name/hours so the chart can render top 7
+      shiftDistribution.value = topArr.map(p => ({ name: p.name, hours: Math.round((p.hours + Number.EPSILON) * 100) / 100 }));
+    } catch (e) {
+      // if anything goes wrong, leave shiftDistribution empty
+      console.error('Failed to compute top employees this week', e);
+    }
+    workforceAnalytics.value = months.map(m => ({ ...m, efficiency: Math.round(Math.max(70, 90 - (m.overtime / (m.totalHours || 1) * 100 || 0))) }));
+
+  } catch (e) {
+    console.error('Failed to load admin reports', e);
+  }
+};
+
+onMounted(() => {
+  loadAdminReports();
+});
+
+const avgEfficiency = computed(() => {
+  if (!workforceAnalytics.value || workforceAnalytics.value.length === 0) return 0;
+  const sum = workforceAnalytics.value.reduce((s, m) => s + (m.efficiency || 0), 0);
+  return Math.round(sum / workforceAnalytics.value.length) || 0;
+});
+
+// Tooltip formatter for hours chart
+const hoursFormatter = (value) => [value, 'Hours'];
+
+// Parse assorted timestamp formats (ISO string, numeric seconds or millis, numeric strings)
+const parseTimestamp = (v) => {
+  if (v === null || v === undefined || v === '') return null;
+  // numeric (already a number)
+  if (typeof v === 'number') {
+    // if value looks like seconds (1e9..1e10) convert to ms
+    return new Date(v > 1e12 ? v : v * 1000);
+  }
+  if (typeof v === 'string') {
+    const trimmed = v.trim();
+    if (trimmed === '') return null;
+    const asNum = Number(trimmed);
+    if (!Number.isNaN(asNum) && /^\d+$/.test(trimmed)) {
+      // pure integer string
+      return new Date(asNum > 1e12 ? asNum : asNum * 1000);
+    }
+    // try ISO / parseable string
+    const d = new Date(trimmed);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+};
 </script>
 
 <template>
@@ -205,7 +359,7 @@ const shiftDistribution = [
             </div>
             <div>
               <p class="text-sm text-muted-foreground">Total Employees</p>
-              <p class="mt-1">108</p>
+              <p class="mt-1">{{ totalEmployees }}</p>
             </div>
           </div>
         </CardContent>
@@ -221,7 +375,7 @@ const shiftDistribution = [
             </div>
             <div>
               <p class="text-sm text-muted-foreground">Monthly Hours</p>
-              <p class="mt-1">8,100</p>
+              <p class="mt-1">{{ monthlyHours }}</p>
             </div>
           </div>
         </CardContent>
@@ -237,7 +391,7 @@ const shiftDistribution = [
             </div>
             <div>
               <p class="text-sm text-muted-foreground">Avg Efficiency</p>
-              <p class="mt-1">92%</p>
+              <p class="mt-1">{{ avgEfficiency }}%</p>
             </div>
           </div>
         </CardContent>
@@ -255,7 +409,7 @@ const shiftDistribution = [
               <p class="text-sm text-muted-foreground">
                 Compliance Issues
               </p>
-              <p class="mt-1">11</p>
+              <p class="mt-1">{{ complianceIssues }}</p>
             </div>
           </div>
         </CardContent>
@@ -276,87 +430,36 @@ const shiftDistribution = [
       <TabsContent value="workforce" class="space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle>6-Month Workforce Analytics</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" :height="350">
-              <AreaChart :data="workforceAnalytics">
-                <defs>
-                  <linearGradient
-                    id="colorHours"
-                    x1="0"
-                    y1="0"
-                    x2="0"
-                    y2="1"
-                  >
-                    <stop
-                      offset="5%"
-                      stopColor="#3b82f6"
-                      :stopOpacity="0.8"
-                    />
-                    <stop
-                      offset="95%"
-                      stopColor="#3b82f6"
-                      :stopOpacity="0"
-                    />
-                  </linearGradient>
-                  <linearGradient
-                    id="colorOvertime"
-                    x1="0"
-                    y1="0"
-                    x2="0"
-                    y2="1"
-                  >
-                    <stop
-                      offset="5%"
-                      stopColor="#f59e0b"
-                      :stopOpacity="0.8"
-                    />
-                    <stop
-                      offset="95%"
-                      stopColor="#f59e0b"
-                      :stopOpacity="0"
-                    />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="hsl(var(--border))"
-                />
-                <XAxis
-                  dataKey="month"
-                  stroke="hsl(var(--muted-foreground))"
-                />
-                <YAxis stroke="hsl(var(--muted-foreground))" />
-                <Tooltip
-                  :contentStyle="{
-                    backgroundColor: 'hsl(var(--card))',
-                    border: '1px solid hsl(var(--border))',
-                    borderRadius: 'var(--radius)',
-                  }"
-                />
-                <Legend />
-                <Area
-                  type="monotone"
-                  dataKey="totalHours"
-                  stackId="1"
-                  stroke="#3b82f6"
-                  :fillOpacity="1"
-                  fill="url(#colorHours)"
-                  name="Total Hours"
-                />
-                <Area
-                  type="monotone"
-                  dataKey="overtime"
-                  stackId="2"
-                  stroke="#f59e0b"
-                  :fillOpacity="1"
-                  fill="url(#colorOvertime)"
-                  name="Overtime Hours"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </CardContent>
+              <CardTitle>Top 7: Hours This Week (Mon → Sun)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" :height="350">
+                <BarChart :data="shiftDistribution">
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="hsl(var(--border))"
+                  />
+                  <XAxis
+                    dataKey="name"
+                    stroke="hsl(var(--muted-foreground))"
+                    :interval="0"
+                    :angle="-30"
+                    textAnchor="end"
+                  />
+                  <YAxis stroke="hsl(var(--muted-foreground))" />
+                  <Tooltip
+                    :contentStyle="{
+                      backgroundColor: 'hsl(var(--card))',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: 'var(--radius)',
+                    }"
+                    :formatter="hoursFormatter"
+                  />
+                  <Legend />
+                  <Bar dataKey="hours" fill="#3b82f6" name="Hours" />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
         </Card>
 
         <Card>
@@ -616,38 +719,21 @@ const shiftDistribution = [
       <TabsContent value="shifts" class="space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle>Daily Shift Distribution</CardTitle>
+            <CardTitle>Top 7: Hours This Week (Mon → Sun)</CardTitle>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" :height="350">
-              <AreaChart :data="shiftDistribution">
-                <defs>
-                  <linearGradient
-                    id="colorEmployees"
-                    x1="0"
-                    y1="0"
-                    x2="0"
-                    y2="1"
-                  >
-                    <stop
-                      offset="5%"
-                      stopColor="#06b6d4"
-                      :stopOpacity="0.8"
-                    />
-                    <stop
-                      offset="95%"
-                      stopColor="#06b6d4"
-                      :stopOpacity="0"
-                    />
-                  </linearGradient>
-                </defs>
+              <BarChart :data="shiftDistribution">
                 <CartesianGrid
                   strokeDasharray="3 3"
                   stroke="hsl(var(--border))"
                 />
                 <XAxis
-                  dataKey="hour"
+                  dataKey="name"
                   stroke="hsl(var(--muted-foreground))"
+                  :interval="0"
+                  :angle="-30"
+                  textAnchor="end"
                 />
                 <YAxis stroke="hsl(var(--muted-foreground))" />
                 <Tooltip
@@ -656,17 +742,31 @@ const shiftDistribution = [
                     border: '1px solid hsl(var(--border))',
                     borderRadius: 'var(--radius)',
                   }"
-                  :formatter="(value) => [`${value}`, 'Employees']"
+                  :formatter="hoursFormatter"
                 />
-                <Area
-                  type="monotone"
-                  dataKey="employees"
-                  stroke="#06b6d4"
-                  :fillOpacity="1"
-                  fill="url(#colorEmployees)"
-                />
-              </AreaChart>
+                <Legend />
+                <Bar dataKey="hours" fill="#06b6d4" name="Hours" />
+              </BarChart>
             </ResponsiveContainer>
+          </CardContent>
+          <!-- debug panel when no data -->
+          <CardContent v-if="(!shiftDistribution || shiftDistribution.length === 0)">
+            <div class="text-sm text-muted-foreground">No data found for Top 7 this week. Debug info:</div>
+            <div class="mt-2 grid grid-cols-2 gap-4 text-sm">
+              <div>Sample size: <strong>{{ shiftDebug.sampleCount }}</strong></div>
+              <div>All rows fetched: <strong>{{ shiftDebug.allRows }}</strong></div>
+              <div>Per-user count: <strong>{{ shiftDebug.perUserCount }}</strong></div>
+              <div>Week range: <strong>{{ shiftDebug.weekStart }}</strong> → <strong>{{ shiftDebug.weekEnd }}</strong></div>
+            </div>
+            <div class="mt-3 text-xs">
+              <div class="font-medium">Per-user totals (first 20):</div>
+              <ul class="list-disc pl-5 mt-1 max-h-36 overflow-auto">
+                <li v-for="(e, idx) in shiftDebug.entries.slice(0, 20)" :key="idx">
+                  {{ e.name || e.uid }} — {{ e.hours }}h
+                </li>
+                <li v-if="shiftDebug.entries.length === 0">(no per-user totals)</li>
+              </ul>
+            </div>
           </CardContent>
         </Card>
       </TabsContent>

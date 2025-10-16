@@ -1,5 +1,8 @@
 <script setup>
 import { ref } from 'vue';
+import toast from '../../utils/toast.js';
+import apiService from '../../services/apiService.js';
+import authManager from '../../services/authService.js';
 import Card from '../ui/card.vue';
 import {
   CardContent,
@@ -20,21 +23,51 @@ import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 
 const selectedTime = ref('');
 const reason = ref('');
+const dateValue = ref(new Date().toISOString().split('T')[0]);
 const submitted = ref(false);
 
-const missedClockOuts = [
+// Make history reactive; if backend provides a history endpoint we can replace this
+const missedClockOuts = ref([
   { date: '2025-09-28', clockIn: '8:00 AM', status: 'approved' },
   { date: '2025-09-25', clockIn: '8:15 AM', status: 'approved' },
-];
+]);
 
-const handleSubmit = () => {
-  if (selectedTime.value && reason.value.trim()) {
+const handleSubmit = async () => {
+  if (selectedTime.value && reason.value.trim() && dateValue.value) {
     submitted.value = true;
-    setTimeout(() => {
-      submitted.value = false;
-      selectedTime.value = '';
-      reason.value = '';
-    }, 3000);
+    toast.loading('Submitting request...');
+    try {
+      // Build payload for discrepancy/missing clock-out
+      const userProfile = await authManager.getUserProfile();
+      const userId = userProfile?.id || userProfile?.data?.id || (JSON.parse(localStorage.getItem('user_data') || '{}')?.id);
+      const payload = {
+        type: 'forgot_clock_out',
+        user_id: userId,
+        date: dateValue.value,
+        clock_out_time: selectedTime.value,
+        reason: reason.value.trim(),
+      };
+
+      const res = await apiService.resolveDiscrepancy(payload);
+
+      // If API returns item or success, push to local history; fall back to local representation
+      const entry = res && res.data ? res.data : { date: dateValue.value, clockIn: '-', clockOut: selectedTime.value, status: res?.status || 'pending' };
+      missedClockOuts.value.unshift(entry);
+      toast.success('Request submitted');
+
+      // Notify other UI to refresh clocks/timesheets
+      try { window.dispatchEvent(new CustomEvent('clock-changed')); } catch (_) {}
+
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to submit request');
+    } finally {
+      setTimeout(() => {
+        submitted.value = false;
+        selectedTime.value = '';
+        reason.value = '';
+      }, 500);
+    }
   }
 };
 </script>

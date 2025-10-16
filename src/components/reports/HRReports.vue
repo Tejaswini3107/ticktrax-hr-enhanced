@@ -40,16 +40,19 @@ import {
   TabsTrigger,
 } from '../ui/tabs.vue';
 
-const payrollData = [
+import { ref, onMounted } from 'vue';
+import apiService from '../../services/apiService.js';
+
+const payrollData = ref([
   { month: 'Apr', regular: 125000, overtime: 12500, total: 137500 },
   { month: 'May', regular: 128000, overtime: 13200, total: 141200 },
   { month: 'Jun', regular: 130000, overtime: 15000, total: 145000 },
   { month: 'Jul', regular: 132000, overtime: 16500, total: 148500 },
   { month: 'Aug', regular: 129000, overtime: 14800, total: 143800 },
   { month: 'Sep', regular: 135000, overtime: 17200, total: 152200 },
-];
+]);
 
-const departmentCostsData = [
+const departmentCostsData = ref([
   {
     dept: 'Production',
     employees: 45,
@@ -80,9 +83,9 @@ const departmentCostsData = [
     avgHours: 39.5,
     totalCost: 22000,
   },
-];
+]);
 
-const complianceData = [
+const complianceData = ref([
   { metric: 'FLSA Violations', value: 0, status: 'compliant', target: 0 },
   {
     metric: 'Missing Timesheets',
@@ -103,18 +106,18 @@ const complianceData = [
     status: 'warning',
     target: 0,
   },
-];
+]);
 
-const turnoverData = [
+const turnoverData = ref([
   { month: 'Apr', hires: 3, terminations: 1, netChange: 2 },
   { month: 'May', hires: 2, terminations: 2, netChange: 0 },
   { month: 'Jun', hires: 4, terminations: 1, netChange: 3 },
   { month: 'Jul', hires: 2, terminations: 3, netChange: -1 },
   { month: 'Aug', hires: 5, terminations: 2, netChange: 3 },
   { month: 'Sep', hires: 3, terminations: 1, netChange: 2 },
-];
+]);
 
-const laborDistribution = [
+const laborDistribution = ref([
   { hour: '6 AM', employees: 12 },
   { hour: '7 AM', employees: 35 },
   { hour: '8 AM', employees: 68 },
@@ -128,7 +131,63 @@ const laborDistribution = [
   { hour: '4 PM', employees: 75 },
   { hour: '5 PM', employees: 45 },
   { hour: '6 PM', employees: 25 },
-];
+]);
+
+// Summary metrics
+const totalEmployees = ref(0);
+const monthlyPayroll = ref(0);
+const totalHours = ref(0);
+const complianceIssues = ref(0);
+
+const loadHRReports = async () => {
+  try {
+    const users = await apiService.listUsers();
+    const userArray = Array.isArray(users) ? users : (users?.data || []);
+    totalEmployees.value = userArray.length;
+
+    // aggregate monthly hours (sample up to 50 users)
+    const sample = userArray.slice(0, 50);
+    const now = new Date();
+    const month = now.getMonth();
+    const year = now.getFullYear();
+    let monthHours = 0;
+    let issues = 0;
+
+    await Promise.all(sample.map(async (u) => {
+      try {
+        const uid = u.id || u.attributes?.id;
+        if (!uid) return;
+        const rows = await apiService.getUserWorkingTimes(uid);
+        const arr = Array.isArray(rows) ? rows : (rows?.data || []);
+        for (const r of arr) {
+          const start = r.start_time || r.timestamp || '';
+          const d = start ? new Date(start) : null;
+          const hours = Number(r.duration_hours || r.hours || 0) || 0;
+          if (d && d.getMonth() === month && d.getFullYear() === year) {
+            monthHours += hours;
+          }
+          if (r.status === 'missing_clock_out' || r.status === 'violation' || r.pending_approval) {
+            issues += 1;
+          }
+        }
+      } catch (e) {
+        // ignore per-user failures
+      }
+    }));
+
+    totalHours.value = Math.round(monthHours);
+    // Estimate payroll using a default hourly rate when payroll API isn't available.
+    const defaultHourlyRate = 20; // assumption: average $20/h if payroll endpoints are not present
+    monthlyPayroll.value = Math.round(monthHours * defaultHourlyRate);
+    complianceIssues.value = issues;
+  } catch (e) {
+    console.error('Failed to load HR reports', e);
+  }
+};
+
+onMounted(() => {
+  loadHRReports();
+});
 </script>
 
 <template>
@@ -166,7 +225,7 @@ const laborDistribution = [
               <p class="text-sm text-muted-foreground">
                 Total Employees
               </p>
-              <p class="mt-1">108</p>
+              <p class="mt-1">{{ totalEmployees }}</p>
             </div>
           </div>
         </CardContent>
@@ -184,7 +243,7 @@ const laborDistribution = [
               <p class="text-sm text-muted-foreground">
                 Monthly Payroll
               </p>
-              <p class="mt-1">$152,200</p>
+              <p class="mt-1">${{ monthlyPayroll.toLocaleString() }}</p>
             </div>
           </div>
         </CardContent>
@@ -200,7 +259,7 @@ const laborDistribution = [
             </div>
             <div>
               <p class="text-sm text-muted-foreground">Total Hours</p>
-              <p class="mt-1">17,856</p>
+              <p class="mt-1">{{ totalHours }}</p>
             </div>
           </div>
         </CardContent>
@@ -218,7 +277,7 @@ const laborDistribution = [
               <p class="text-sm text-muted-foreground">
                 Compliance Issues
               </p>
-              <p class="mt-1">8</p>
+              <p class="mt-1">{{ complianceIssues }}</p>
             </div>
           </div>
         </CardContent>

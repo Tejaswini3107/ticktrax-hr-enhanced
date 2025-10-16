@@ -7,14 +7,14 @@ export const MOBILE_CONFIG = {
   
   // Mobile API configuration
   API: {
-    BASE_URL: 'https://batman-api-a20b3a37aa3c.herokuapp.com/api',
-    WS_URL: 'wss://batman-api-a20b3a37aa3c.herokuapp.com/socket'
+    BASE_URL: 'http://10.68.254.53:4000/api',
+    WS_URL: 'ws://10.68.254.53:4000/socket'
   },
   
   // Fallback configuration for web development
   WEB_API: {
     BASE_URL: 'https://batman-api-a20b3a37aa3c.herokuapp.com/api',
-    WS_URL: 'wss://batman-api-a20b3a37aa3c.herokuapp.com/socket'
+    WS_URL: 'ws://batman-api-a20b3a37aa3c.herokuapp.com/socket'
   }
 };
 

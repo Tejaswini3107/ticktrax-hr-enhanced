@@ -1,7 +1,7 @@
 import { API_CONFIG } from '../config/api.js'
 import { getMobileApiConfig, isCordovaApp } from '../config/mobile.js'
 import authManager from './authService.js'
-import { apiService } from './apiService.js'
+import apiService from './apiService.js'
 
 /**
  * REAL-TIME API SERVICE
@@ -23,39 +23,6 @@ class RealTimeService {
     
     // Event listeners
     this.eventListeners = new Map()
-    
-    // Fallback polling system
-    this.pollingIntervals = new Map()
-    this.currentUser = null
-    this.lastSyncTime = null
-    
-    // Auto-initialize
-    this.initialize()
-  }
-
-  // ==================== INITIALIZATION ====================
-
-  /**
-   * Initialize real-time service with hybrid approach
-   * REAL-TIME: WebSocket + API polling fallback
-   */
-  async initialize() {
-    console.log('⚡ Initializing real-time service...')
-    
-    try {
-      // Try WebSocket connection first
-      await this.connect()
-    } catch (error) {
-      console.log('🔌 WebSocket failed, using API polling fallback:', error.message)
-      this.startPollingFallback()
-    }
-    
-    // Start real-time clock updates
-    this.startClockUpdates()
-    
-    this.isConnected = true
-    this.emit('connected')
-    console.log('✅ Real-time service active')
   }
 
   // ==================== CONNECTION MANAGEMENT ====================
@@ -73,8 +40,8 @@ class RealTimeService {
 
       console.log('🔌 Connecting to real-time server...')
       
-      // Get authentication token
-      const authToken = authManager.jwtToken
+      // Get authentication token from API service
+      const authToken = apiService.getJwtToken()
       if (!authToken) {
         throw new Error('No authentication token available')
       }
@@ -543,117 +510,8 @@ class RealTimeService {
       reconnectAttempts: this.reconnectAttempts
     }
   }
-  // ==================== POLLING FALLBACK ====================
-
-  /**
-   * Start API polling as fallback when WebSocket fails
-   * REAL-TIME: Polls API every 30 seconds for updates
-   */
-  startPollingFallback() {
-    console.log('🔄 Starting API polling fallback...')
-    
-    // Poll user status every 30 seconds
-    this.pollingIntervals.set('user-status', setInterval(async () => {
-      await this.pollUserStatus()
-    }, 30000))
-    
-    // Poll notifications every 60 seconds
-    this.pollingIntervals.set('notifications', setInterval(async () => {
-      await this.pollNotifications()
-    }, 60000))
-    
-    // Initial poll
-    this.pollUserStatus()
-  }
-
-  /**
-   * Poll user status from API
-   */
-  async pollUserStatus() {
-    try {
-      if (!this.currentUser) {
-        const userRes = await authManager.getCurrentUser()
-        this.currentUser = userRes?.data
-      }
-      
-      if (this.currentUser) {
-        // Get current clock status
-        const status = await apiService.getCurrentStatus()
-        
-        // Emit status update
-        this.emit('clock-status-changed', {
-          is_clocked_in: status.is_clocked_in,
-          clock_in_time: status.clock_in_time,
-          total_hours_today: status.total_hours_today
-        })
-        
-        this.lastSyncTime = Date.now()
-      }
-    } catch (error) {
-      console.error('Polling error:', error)
-      // Fallback to mock data
-      this.emit('clock-status-changed', {
-        is_clocked_in: false,
-        clock_in_time: null,
-        total_hours_today: 0
-      })
-      this.emit('sync-error', error)
-    }
-  }
-
-  /**
-   * Poll notifications from API
-   */
-  async pollNotifications() {
-    try {
-      const notifications = await apiService.getNotifications()
-      if (notifications && notifications.length > 0) {
-        this.emit('notifications-updated', notifications)
-      }
-    } catch (error) {
-      console.error('Notification polling error:', error)
-      // Fallback to mock notifications
-      this.emit('notifications-updated', [
-        { id: 1, message: 'Welcome to TickTrax!', type: 'info', read: false },
-        { id: 2, message: 'Time entry approved', type: 'success', read: false }
-      ])
-    }
-  }
-
-  /**
-   * Start real-time clock updates
-   */
-  startClockUpdates() {
-    this.pollingIntervals.set('clock', setInterval(() => {
-      this.emit('clock-update', {
-        timestamp: Date.now(),
-        time: new Date().toLocaleTimeString(),
-        date: new Date().toLocaleDateString()
-      })
-    }, 1000))
-  }
-
-  /**
-   * Stop all polling intervals
-   */
-  stopPolling() {
-    this.pollingIntervals.forEach((interval, key) => {
-      clearInterval(interval)
-      console.log(`🛑 Stopped polling: ${key}`)
-    })
-    this.pollingIntervals.clear()
-  }
-
-  /**
-   * Cleanup resources
-   */
-  cleanup() {
-    this.disconnect()
-    this.stopPolling()
-    this.eventListeners.clear()
-    this.isConnected = false
-  }
 }
 
+// Export singleton instance
 const realTimeService = new RealTimeService()
 export default realTimeService

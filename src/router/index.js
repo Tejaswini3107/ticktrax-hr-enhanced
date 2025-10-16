@@ -11,6 +11,13 @@ import AdminDashboard from '../components/dashboards/AdminDashboard.vue'
 import HRDashboard from '../components/dashboards/HRDashboard.vue'
 import ProfileDialog from '../components/dialogs/ProfileDialog.vue'
 
+// Import HR side pages
+import EmployeeManagement from '../components/hr/EmployeeManagement.vue'
+import Recruitment from '../components/hr/Recruitment.vue'
+import PerformanceManagement from '../components/hr/PerformanceManagement.vue'
+import PayrollManagement from '../components/hr/PayrollManagement.vue'
+import HRReports from '../components/hr/HRReports.vue'
+
 // Define routes with authentication requirements
 const routes = [
   {
@@ -67,25 +74,7 @@ const routes = [
       {
         path: '',
         name: 'DashboardHome',
-        redirect: to => {
-          // Auto-redirect to role-specific dashboard
-          const userData = localStorage.getItem('user_data');
-          if (userData) {
-            try {
-              const user = JSON.parse(userData);
-              const role = user.role || 'employee';
-              
-              // Route based on role
-              if (role === 'admin') return '/dashboard/admin';
-              if (role === 'manager') return '/dashboard/manager';
-              if (role === 'hr') return '/dashboard/hr';
-              return '/dashboard/employee';
-            } catch (e) {
-              return '/dashboard/employee';
-            }
-          }
-          return '/dashboard/employee';
-        },
+        component: EmployeeDashboard, // Default dashboard
         meta: { requiresAuth: true }
       },
       {
@@ -94,7 +83,7 @@ const routes = [
         component: EmployeeDashboard,
         meta: { 
           requiresAuth: true,
-          requiresRole: ['employee', 'manager', 'admin', 'hr']
+          requiresRole: ['employee', 'manager', 'admin']
         }
       },
       {
@@ -103,7 +92,7 @@ const routes = [
         component: ManagerDashboard,
         meta: { 
           requiresAuth: true,
-          requiresRole: ['manager', 'admin', 'hr']
+          requiresRole: ['manager', 'admin']
         }
       },
       {
@@ -119,6 +108,51 @@ const routes = [
         path: 'hr',
         name: 'HRDashboard',
         component: HRDashboard,
+        meta: { 
+          requiresAuth: true,
+          requiresRole: ['hr', 'admin']
+        }
+      },
+      {
+        path: 'hr/employees',
+        name: 'HREmployeeManagement',
+        component: EmployeeManagement,
+        meta: { 
+          requiresAuth: true,
+          requiresRole: ['hr', 'admin']
+        }
+      },
+      {
+        path: 'hr/recruitment',
+        name: 'HRRecruitment',
+        component: Recruitment,
+        meta: { 
+          requiresAuth: true,
+          requiresRole: ['hr', 'admin']
+        }
+      },
+      {
+        path: 'hr/performance',
+        name: 'HRPerformanceManagement',
+        component: PerformanceManagement,
+        meta: { 
+          requiresAuth: true,
+          requiresRole: ['hr', 'admin']
+        }
+      },
+      {
+        path: 'hr/payroll',
+        name: 'HRPayrollManagement',
+        component: PayrollManagement,
+        meta: { 
+          requiresAuth: true,
+          requiresRole: ['hr', 'admin']
+        }
+      },
+      {
+        path: 'hr/reports',
+        name: 'HRReports',
+        component: HRReports,
         meta: { 
           requiresAuth: true,
           requiresRole: ['hr', 'admin']
@@ -233,34 +267,9 @@ router.beforeEach(async (to, from, next) => {
       try {
         const isAuthenticated = await authManager.isAuthenticated()
         if (isAuthenticated) {
-          // Get user role and redirect to appropriate dashboard
-          const userData = localStorage.getItem('user_data');
-          if (userData) {
-            try {
-              const user = JSON.parse(userData);
-              const role = user.role || 'employee';
-              
-              if (role === 'admin') {
-                next('/dashboard/admin');
-                return;
-              }
-              if (role === 'manager') {
-                next('/dashboard/manager');
-                return;
-              }
-              if (role === 'hr') {
-                next('/dashboard/admin'); // HR uses admin dashboard
-                return;
-              }
-              next('/dashboard/employee');
-              return;
-            } catch (e) {
-              next('/dashboard');
-              return;
-            }
-          }
-          next('/dashboard');
-          return;
+          // Already logged in, redirect to dashboard
+          next('/dashboard')
+          return
         }
       } catch (error) {
         // Continue to login if auth check fails

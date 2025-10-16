@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onMounted } from 'vue';
 import Card from "../ui/card.vue";
 import { CardContent, CardHeader, CardTitle } from "../ui/card-components.vue";
 import Button from "../ui/button.vue";
@@ -12,13 +12,12 @@ import AdminReports from "../reports/AdminReports.vue";
 import HelpCenter from "../help/HelpCenter.vue";
 import EmployeeDetailsDialog from "../dialogs/EmployeeDetailsDialog.vue";
 import AddEditEmployeeDialog from "../dialogs/AddEditEmployeeDialog.vue";
-import AddUserDialog from "../dialogs/AddUserDialog.vue";
+// AddUserDialog intentionally not used for employee edits; local AddEditEmployeeDialog is used instead
 import GenerateReportDialog from "../dialogs/GenerateReportDialog.vue";
 import ExportDataDialog from "../dialogs/ExportDataDialog.vue";
 import WorkWeekSettingsDialog from "../dialogs/WorkWeekSettingsDialog.vue";
 import { toast } from 'vue-sonner';
-import realTimeService from '../../services/realTimeService.js';
-import { apiService } from '../../services/apiService.js';
+import apiService from '../../services/apiService.js';
 import authManager from '../../services/authService.js';
 
 const props = defineProps({
@@ -31,31 +30,191 @@ const isAddEditOpen = ref(false);
 const editingEmployee = ref(null);
 const isReportOpen = ref(false);
 const isExportOpen = ref(false);
-const isAddUserOpen = ref(false);
+// removed isAddUserOpen (we use isAddEditOpen for add/edit employee flows)
 const isWorkWeekOpen = ref(false);
-const isLoading = ref(false);
-const searchQuery = ref('');
-
-// API-driven data
 const employees = ref([]);
 const departmentStats = ref([]);
-const dashboardStats = ref({
-  totalEmployees: 0,
-  activeToday: 0,
-  totalHoursWeek: 0,
-  pendingActions: 0
-});
+const recentActivity = ref([]);
+const summary = ref({ totalEmployees: 0, clockedIn: 0, avgHoursWeek: 0, alertsCount: 0 });
 
-// Filtered employees based on search
-const filteredEmployees = computed(() => {
-  if (!searchQuery.value) return employees.value;
-  const query = searchQuery.value.toLowerCase();
-  return employees.value.filter(emp => 
-    emp.name.toLowerCase().includes(query) ||
-    emp.department?.toLowerCase().includes(query) ||
-    emp.role?.toLowerCase().includes(query)
-  );
-});
+const loadAdminData = async () => {
+  try {
+    const cur = await authManager.getCurrentUser();
+    if (!cur.success) throw new Error('Not signed in');
+
+    // Load users
+    const users = await apiService.listUsers();
+    const userArray = Array.isArray(users) ? users : [];
+    // Map employees for table
+    const emps = [];
+    const deptMap = new Map();
+    let totalHours = 0;
+    let clockedInCount = 0;
+    const activities = [];
+
+    // Limit per-user working-time fetches for performance
+    // Deduplicate by user id in case the users list contains duplicates
+    const seenUserIds = new Set();
+    for (const u of userArray.slice(0, 100)) {
+      const uid = u.id || u.attributes?.id || u.user_id;
+      // If no canonical id, skip (we can't query working times without an id)
+      if (!uid) {
+        console.warn('Skipping user without id', u);
+        continue;
+      }
+      // Skip duplicate users
+      if (seenUserIds.has(uid)) continue;
+      seenUserIds.add(uid);
+      const name = u.attributes?.first_name ? `${u.attributes.first_name} ${u.attributes.last_name}` : (u.name || u.email || `User ${uid}`);
+      const role = u.role || u.attributes?.role || 'employee';
+      const dept = u.department || u.attributes?.department || 'Unknown';
+      const status = (u.active === false || u.attributes?.active === false) ? 'inactive' : 'active';
+
+  // default employee entry
+  emps.push({ id: uid || u.id || u.user_id || Math.random().toString(36).slice(2,9), name, email: u.attributes?.personal_email || u.attributes?.email || u.email || '', department: dept, role, status, hoursThisWeek: 0, type: u.attributes?.type || 'Regular' });
+
+      // aggregate per-department
+      if (!deptMap.has(dept)) deptMap.set(dept, { department: dept, employees: 0, activeToday: 0, totalHours: 0 });
+      const dm = deptMap.get(dept);
+      dm.employees += 1;
+
+      try {
+        const times = await apiService.getUserWorkingTimes(uid);
+        const list = Array.isArray(times) ? times : [];
+  // Calculate week window (Monday → Sunday)
+  const weekNow = new Date();
+  // Determine Monday of the current week (local time). JS getDay(): 0 (Sun) .. 6 (Sat)
+  const startOfWeek = new Date(weekNow);
+  const day = weekNow.getDay();
+  // If today is Sunday (0), go back 6 days to Monday; otherwise shift to Monday
+  const diffToMonday = day === 0 ? -6 : (1 - day);
+  startOfWeek.setDate(weekNow.getDate() + diffToMonday);
+  startOfWeek.setHours(0,0,0,0);
+  const startOfNextWeek = new Date(startOfWeek.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+  // Sum durations for entries whose start_time/timestamp falls within the current week (Mon-Sun)
+        // Helper to compute hours for a single entry robustly
+        const computeEntryHours = (t) => {
+          // Try explicit hour-like fields first
+          const hourFields = [t.duration_hours, t.hours, t.hours_total, t.duration, t.total_hours];
+          for (const v of hourFields) {
+            const n = Number(v);
+            if (!isNaN(n) && n !== 0) return n;
+          }
+
+          // Try minute-like fields
+          const minuteFields = [t.duration_minutes, t.minutes, t.total_minutes];
+          for (const v of minuteFields) {
+            const n = Number(v);
+            if (!isNaN(n) && n !== 0) return n / 60;
+          }
+
+          // Fallback: compute from start/end timestamps (handle running entries)
+          const s = t.start_time || t.timestamp || t.created_at || t.start || t.date;
+          const e = t.end_time || t.stop_time || t.updated_at || t.end || t.stopped_at;
+          if (!s) return 0;
+          const sd = new Date(s);
+          if (isNaN(sd)) return 0;
+          let ed = e ? new Date(e) : null;
+          if ((!ed || isNaN(ed)) && (t.status === 'running' || t.status === 'in_progress' || t.status === 'active')) {
+            ed = weekNow; // running entry — count up to now
+          }
+          if (!ed || isNaN(ed)) return 0;
+          const diffHours = (ed.getTime() - sd.getTime()) / (1000 * 60 * 60);
+          return diffHours > 0 ? diffHours : 0;
+        };
+
+        // Sum hours for entries that start within the current Monday-Sunday week
+        const weekly = list.reduce((acc, t) => {
+          const s = t.start_time || t.timestamp || t.created_at || t.start || t.date;
+          if (!s) return acc;
+          const sd = new Date(s);
+          if (isNaN(sd)) return acc;
+          if (sd >= startOfWeek && sd < startOfNextWeek) {
+            return acc + computeEntryHours(t);
+          }
+          return acc;
+        }, 0);
+
+        totalHours += weekly;
+        dm.totalHours += weekly;
+
+        // Update employee hours (ensure we match the id we used when creating the row)
+        const empIdx = emps.findIndex(e => e.id === (uid || u.id || u.user_id));
+        if (empIdx >= 0) emps[empIdx].hoursThisWeek = Math.round(weekly * 10) / 10;
+
+        // Active/clocked-in count: check if any recent entry is currently running (or missing an end)
+  // Determine today's boundary (local time) using the week reference time
+  const startOfToday = new Date(weekNow);
+  startOfToday.setHours(0,0,0,0);
+  const startOfTomorrow = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000);
+
+        // Count user as clocked-in today if the working-time endpoint returns any record with a start on today's local date
+        const hasTodayRecord = list.some(r => {
+          const sRaw = r.start_time ?? r.timestamp ?? r.created_at ?? r.start ?? r.date;
+          if (sRaw === undefined || sRaw === null || sRaw === '') return false;
+          // Try to parse numeric timestamps and ISO-like strings into a Date
+          let sDate = null;
+          if (typeof sRaw === 'number' || (/^\d+$/.test(String(sRaw)).valueOf())) {
+            const n = Number(sRaw);
+            sDate = new Date(n);
+          } else {
+            sDate = new Date(String(sRaw));
+          }
+          if (!isNaN(sDate.getTime())) {
+            // Compare local year/month/day
+            return sDate.getFullYear() === startOfToday.getFullYear() && sDate.getMonth() === startOfToday.getMonth() && sDate.getDate() === startOfToday.getDate();
+          }
+          // Fallback: compare date-prefix before 'T'
+          const datePart = String(sRaw).split('T')[0];
+          return datePart === startOfToday.toISOString().split('T')[0];
+        });
+        if (hasTodayRecord) {
+          clockedInCount += 1;
+          dm.activeToday += 1;
+        }
+
+        // Collect recent activity entries: use the most recent entries by timestamp
+        const recentSorted = list.slice().sort((a, b) => {
+          const at = new Date(a.start_time || a.timestamp || a.created_at || 0).getTime();
+          const bt = new Date(b.start_time || b.timestamp || b.created_at || 0).getTime();
+          return bt - at;
+        }).slice(0, 5);
+
+        recentSorted.forEach(t => activities.push({
+          user: name,
+          action: t.action || (t.status === 'running' ? 'clocked in' : 'timesheet'),
+          details: t.location || t.type || (t.start_time || t.timestamp) || '',
+          time: t.start_time || t.timestamp || t.created_at || ''
+        }));
+      } catch (e) {
+        console.warn('Failed loading working times for user', uid, e);
+      }
+    }
+
+    employees.value = emps;
+
+    // build departmentStats
+    const deptArray = Array.from(deptMap.values()).map(d => ({ department: d.department, employees: d.employees, activeToday: d.activeToday, avgHours: d.employees ? Math.round((d.totalHours / d.employees) * 10) / 10 : 0 }));
+    departmentStats.value = deptArray;
+
+    summary.value.totalEmployees = userArray.length;
+    summary.value.clockedIn = clockedInCount;
+    summary.value.avgHoursWeek = userArray.length ? Math.round((totalHours / userArray.length) * 10) / 10 : 0;
+    summary.value.alertsCount = 0; // Could be populated from alert endpoints
+
+    // Build recent activity sorted by time (newest first)
+    recentActivity.value = activities.sort((a,b) => (b.time || '').localeCompare(a.time || '')).slice(0, 10);
+  } catch (err) {
+    console.warn('Load admin data failed', err);
+    toast.error('Unable to load admin data from server. Some admin features may be unavailable.');
+    employees.value = [];
+    departmentStats.value = [];
+    recentActivity.value = [];
+  }
+};
+
+onMounted(loadAdminData);
 
 const handleViewEmployee = (employee) => {
   selectedEmployee.value = employee;
@@ -63,161 +222,54 @@ const handleViewEmployee = (employee) => {
 };
 
 const handleAddUser = () => {
-  isAddUserOpen.value = true;
+  // Open the local Add/Edit Employee dialog for creating a new employee
+  editingEmployee.value = null;
+  isAddEditOpen.value = true;
 };
 
 const handleEditEmployee = (employee) => {
+  // Open the Add/Edit Employee dialog (local form) and prefill with the selected employee
   editingEmployee.value = employee;
   isAddEditOpen.value = true;
 };
 
-// Load dashboard data from API
-const loadDashboard = async () => {
-  isLoading.value = true;
-  console.log('👑 Admin Dashboard: Loading data from API...');
-  
-  try {
-    // Load all users/employees
-    console.log('👑 Fetching users...');
-    const usersRes = await apiService.getUsers();
-    console.log('👑 Users response:', usersRes);
-    
-    if (usersRes && Array.isArray(usersRes)) {
-      employees.value = usersRes.map(user => ({
-        id: user.id,
-        emp_id: `EMP${String(user.id).padStart(3, '0')}`,
-        name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username || user.email,
-        department: user.department || 'General',
-        role: user.role || (user.role_id === 1 ? 'admin' : user.role_id === 2 ? 'manager' : user.role_id === 3 ? 'hr' : 'employee'),
-        status: user.is_active !== false ? 'active' : 'inactive',
-        hoursThisWeek: user.hours_this_week || 0,
-        type: user.employee_type || 'Regular',
-        email: user.email
-      }));
-    }
-    
-    // Calculate department stats from employees
-    const deptMap = new Map();
-    employees.value.forEach(emp => {
-      const dept = emp.department || 'General';
-      if (!deptMap.has(dept)) {
-        deptMap.set(dept, { department: dept, employees: 0, activeToday: 0, totalHours: 0 });
-      }
-      const stats = deptMap.get(dept);
-      stats.employees++;
-      if (emp.status === 'active') stats.activeToday++;
-      stats.totalHours += emp.hoursThisWeek || 0;
-    });
-    
-    departmentStats.value = Array.from(deptMap.values()).map(dept => ({
-      ...dept,
-      avgHours: dept.employees > 0 ? (dept.totalHours / dept.employees).toFixed(1) : 0
-    }));
-    
-    // Get analytics
-    try {
-      const analyticsRes = await apiService.getAnalyticsOverview();
-      const totalHours = employees.value.reduce((sum, emp) => sum + (emp.hoursThisWeek || 0), 0);
-      
-      dashboardStats.value = {
-        totalEmployees: employees.value.length,
-        activeToday: employees.value.filter(e => e.status === 'active').length,
-        totalHoursWeek: Math.round(totalHours),
-        pendingActions: analyticsRes?.pending_approvals || 0
-      };
-    } catch (e) {
-      console.log('Analytics not available:', e);
-      const totalHours = employees.value.reduce((sum, emp) => sum + (emp.hoursThisWeek || 0), 0);
-      dashboardStats.value = {
-        totalEmployees: employees.value.length,
-        activeToday: employees.value.filter(e => e.status === 'active').length,
-        totalHoursWeek: Math.round(totalHours),
-        pendingActions: 0
-      };
-    }
-    
-  } catch (error) {
-    console.error('Error loading admin dashboard:', error);
-    toast.error('Failed to load dashboard data');
-  } finally {
-    isLoading.value = false;
+const handleSaveEmployee = (employeeData) => {
+  if (editingEmployee.value) {
+    toast.success("Employee updated successfully!");
+  } else {
+    toast.success("Employee added successfully!");
   }
+  isAddEditOpen.value = false;
 };
 
-// Setup realtime updates
-onMounted(() => {
-  console.log('📡 Admin Dashboard: Setting up realtime listeners');
-  
-  // Load initial data
-  loadDashboard();
-  
-  // Listen for system-wide updates
-  const handleSystemAlert = (data) => {
-    console.log('📡 Realtime: System alert', data);
-    toast.warning(data.message, { duration: 5000 });
-  };
-  
-  const handleEmployeeStatusChange = (data) => {
-    console.log('📡 Realtime: Employee status changed', data);
-    loadDashboard(); // Reload data
-  };
-  
-  const handleDepartmentStatsUpdated = (data) => {
-    console.log('📡 Realtime: Department stats updated', data);
-    loadDashboard(); // Reload data
-  };
-  
-  const handleNotifications = (notifications) => {
-    console.log('📡 Realtime: Admin notifications', notifications);
-    notifications.forEach(notif => {
-      if (!notif.read) {
-        toast.info(notif.message);
-      }
-    });
-  };
-  
-  // Register listeners
-  realTimeService.on('system-alert', handleSystemAlert);
-  realTimeService.on('employee-status-changed', handleEmployeeStatusChange);
-  realTimeService.on('department-stats-updated', handleDepartmentStatsUpdated);
-  realTimeService.on('notifications-updated', handleNotifications);
-  
-  onUnmounted(() => {
-    // Cleanup listeners
-    realTimeService.off('system-alert', handleSystemAlert);
-    realTimeService.off('employee-status-changed', handleEmployeeStatusChange);
-    realTimeService.off('department-stats-updated', handleDepartmentStatsUpdated);
-    realTimeService.off('notifications-updated', handleNotifications);
-  });
-});
-
-const handleSaveEmployee = async (employeeData) => {
+const handleSaveUser = (userData) => {
+  // Normalize server response and either insert or replace existing employee
   try {
-    if (editingEmployee.value) {
-      await apiService.updateUser(editingEmployee.value.id, employeeData);
-      toast.success("Employee updated successfully!");
+    const src = userData?.data || userData || {};
+    const uid = src.id || src.user_id || src.id || Math.random().toString(36).slice(2,9);
+  const name = src.first_name ? `${src.first_name} ${src.last_name || ''}`.trim() : (src.name || src.email || `User ${uid}`);
+    const dept = src.department || 'Unknown';
+    const role = src.role || 'employee';
+    const status = src.active === false ? 'inactive' : 'active';
+  const updatedEmp = { id: uid, name, email: src.personal_email || src.email || src.attributes?.personal_email || src.attributes?.email || '', department: dept, role, status, hoursThisWeek: 0, type: src.type || 'Regular' };
+
+    // If we were editing, replace the existing employee entry
+    const editIdx = employees.value.findIndex(e => e.id === (editingEmployee.value?.id || editingEmployee.value?.user_id || editingEmployee.value));
+    if (editingEmployee.value?._editing && editIdx >= 0) {
+      employees.value.splice(editIdx, 1, updatedEmp);
+      toast.success('User updated successfully!');
     } else {
-      await apiService.createUser(employeeData);
-      toast.success("Employee added successfully!");
+      employees.value = [updatedEmp, ...employees.value];
+      summary.value.totalEmployees = (summary.value.totalEmployees || 0) + 1;
+      toast.success('User created successfully!');
     }
-    isAddEditOpen.value = false;
-    loadDashboard(); // Reload data
-  } catch (error) {
-    console.error('Error saving employee:', error);
-    toast.error("Failed to save employee");
+  } catch (e) {
+    console.warn('Failed to insert/replace created user into list', e);
+    toast.success('User saved (server response) — refresh to see updates.');
   }
-};
-
-const handleUserAdded = async (userData) => {
-  try {
-    await apiService.createUser(userData);
-    toast.success("User added successfully!");
-    isAddUserOpen.value = false;
-    loadDashboard(); // Reload data
-  } catch (error) {
-    console.error('Error adding user:', error);
-    toast.error("Failed to add user");
-  }
+  // clear editing marker
+  if (editingEmployee.value) delete editingEmployee.value._editing;
+  // isAddUserOpen no longer used
 };
 
 </script>
@@ -228,7 +280,7 @@ const handleUserAdded = async (userData) => {
       <div class="flex items-center justify-between">
         <div>
           <h2>Employee Management</h2>
-          <p class="text-muted-foreground mt-1">Manage all employees across departments</p>
+          <p class="text-muted-foreground mt-1">Manage all employees</p>
         </div>
         <div class="flex gap-2">
           <Button class="gap-2" @click="handleAddUser">
@@ -237,57 +289,55 @@ const handleUserAdded = async (userData) => {
           </Button>
         </div>
       </div>
-      <div class="flex gap-4">
+      <!-- <div class="flex gap-4">
         <div class="relative flex-1">
           <Search class="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-          <Input v-model="searchQuery" placeholder="Search employees..." class="pl-10" />
+          <Input placeholder="Search employees..." class="pl-10" />
         </div>
         <Button variant="outline" class="gap-2">
           <Filter class="h-4 w-4" />
           Filter
         </Button>
-      </div>
+      </div> -->
       <Card>
         <CardContent class="p-0">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Employee</TableHead>
-                <TableHead>Department</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Hours This Week</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
+                  <TableHead>Employee</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Role</TableHead>
+                  <!-- <TableHead>Status</TableHead> -->
+                  <TableHead>Hours This Week</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
             </TableHeader>
             <TableBody>
-              <TableRow v-for="employee in filteredEmployees" :key="employee.id">
+              <TableRow v-for="employee in employees" :key="employee.id">
                 <TableCell>
                   <div>
                     <p class="font-medium">{{ employee.name }}</p>
                     <p class="text-sm text-muted-foreground">{{ employee.id }}</p>
                   </div>
                 </TableCell>
-                <TableCell>{{ employee.department }}</TableCell>
                 <TableCell>
-                  <Badge :variant="employee.role === 'manager' ? 'default' : 'secondary'">{{ employee.role }}</Badge>
-                </TableCell>
-                <TableCell>
-                  <Badge :variant="employee.status === 'active' ? 'default' : 'secondary'" :class="employee.status === 'active' ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'">
-                    {{ employee.status }}
-                  </Badge>
-                </TableCell>
-                <TableCell>{{ employee.hoursThisWeek }}h</TableCell>
-                <TableCell>
-                  <div class="flex items-center gap-1">
-                    <MapPin v-if="employee.type === 'Field Worker'" class="h-3 w-3 text-blue-500" />
-                    {{ employee.type }}
+                  <div>
+                    <p class="text-sm">{{ employee.email || '—' }}</p>
                   </div>
                 </TableCell>
                 <TableCell>
+                  <Badge :variant="employee.role === 'manager' ? 'default' : 'secondary'">{{ employee.role }}</Badge>
+                </TableCell>
+                <!-- <TableCell>
+                  <Badge :variant="employee.status === 'active' ? 'default' : 'secondary'" :class="employee.status === 'active' ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'">
+                    {{ employee.status }}
+                  </Badge>
+                </TableCell> -->
+                <TableCell>{{ employee.hoursThisWeek }}h</TableCell>
+                
+                <TableCell>
                   <div class="flex gap-2">
-                    <Button variant="ghost" size="sm" @click="handleViewEmployee(employee)">View</Button>
+                    <!-- <Button variant="ghost" size="sm" @click="handleViewEmployee(employee)">View</Button> -->
                     <Button variant="ghost" size="sm" @click="handleEditEmployee(employee)">Edit</Button>
                   </div>
                 </TableCell>
@@ -297,8 +347,9 @@ const handleUserAdded = async (userData) => {
         </CardContent>
       </Card>
     </div>
-    <EmployeeDetailsDialog :employee="selectedEmployee" :open="isDetailsOpen" @update:open="isDetailsOpen = $event" />
-    <AddUserDialog :open="isAddUserOpen" @update:open="isAddUserOpen = $event" @save="handleUserAdded" />
+  <EmployeeDetailsDialog :employee="selectedEmployee" :open="isDetailsOpen" @update:open="isDetailsOpen = $event" />
+  <!-- Add/Edit dialog must be present in the employees view so handleEditEmployee can open it -->
+  <AddEditEmployeeDialog :employee="editingEmployee" :open="isAddEditOpen" @update:open="isAddEditOpen = $event" @save="handleSaveEmployee" />
   </div>
 
   <div v-else-if="currentView === 'analytics'">
@@ -321,7 +372,7 @@ const handleUserAdded = async (userData) => {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Department</TableHead>
+                <!-- <TableHead>Department</TableHead> -->
                 <TableHead>Total Employees</TableHead>
                 <TableHead>Active Today</TableHead>
                 <TableHead>Avg Hours/Week</TableHead>
@@ -330,7 +381,7 @@ const handleUserAdded = async (userData) => {
             </TableHeader>
             <TableBody>
               <TableRow v-for="(dept, index) in departmentStats" :key="index">
-                <TableCell>{{ dept.department }}</TableCell>
+                <!-- <TableCell>{{ dept.department }}</TableCell> -->
                 <TableCell>{{ dept.employees }}</TableCell>
                 <TableCell>
                   <Badge variant="default" class="bg-green-500 hover:bg-green-600">{{ dept.activeToday }}</Badge>
@@ -339,9 +390,9 @@ const handleUserAdded = async (userData) => {
                 <TableCell>
                   <div class="flex items-center gap-2">
                     <div class="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                      <div class="h-full bg-primary" :style="{ width: `${Math.round((dept.activeToday / dept.employees) * 100)}%` }"></div>
+                      <div class="h-full bg-primary" :style="{ width: `${dept.employees ? Math.round((dept.activeToday / dept.employees) * 100) : 0}%` }"></div>
                     </div>
-                    <span class="text-sm">{{ Math.round((dept.activeToday / dept.employees) * 100) }}%</span>
+                    <span class="text-sm">{{ dept.employees ? Math.round((dept.activeToday / dept.employees) * 100) : 0 }}%</span>
                   </div>
                 </TableCell>
               </TableRow>
@@ -349,15 +400,12 @@ const handleUserAdded = async (userData) => {
           </Table>
         </CardContent>
       </Card>
-      <div v-if="isLoading" class="text-center py-8">
-        <p class="text-muted-foreground">Loading analytics...</p>
-      </div>
-      <div v-else class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card>
           <CardContent class="pt-6">
             <div class="space-y-2">
               <p class="text-sm text-muted-foreground">Total Employees</p>
-              <p class="text-3xl">{{ dashboardStats.totalEmployees }}</p>
+              <p class="text-3xl">{{ summary.totalEmployees }}</p>
               <p class="text-sm text-muted-foreground">Across all departments</p>
             </div>
           </CardContent>
@@ -366,16 +414,16 @@ const handleUserAdded = async (userData) => {
           <CardContent class="pt-6">
             <div class="space-y-2">
               <p class="text-sm text-muted-foreground">Active Today</p>
-              <p class="text-3xl">{{ dashboardStats.activeToday }}</p>
-              <p class="text-sm text-muted-foreground">{{ dashboardStats.totalEmployees > 0 ? Math.round((dashboardStats.activeToday / dashboardStats.totalEmployees) * 100) : 0 }}% attendance rate</p>
+              <p class="text-3xl">{{ summary.clockedIn }}</p>
+              <p class="text-sm text-muted-foreground">92% attendance rate</p>
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent class="pt-6">
             <div class="space-y-2">
-              <p class="text-sm text-muted-foreground">Total Hours This Week</p>
-              <p class="text-3xl">{{ dashboardStats.totalHoursWeek }}</p>
+              <p class="text-sm text-muted-foreground">Avg Hours/Week</p>
+              <p class="text-3xl">{{ summary.avgHoursWeek }}</p>
               <p class="text-sm text-muted-foreground">Across all departments</p>
             </div>
           </CardContent>
@@ -455,7 +503,7 @@ const handleUserAdded = async (userData) => {
           <div class="flex items-center justify-between">
             <div class="space-y-2">
               <p class="text-sm text-muted-foreground">Total Employees</p>
-              <p class="text-2xl">119</p>
+              <p class="text-2xl">{{ summary.totalEmployees }}</p>
             </div>
             <Users class="h-8 w-8 text-muted-foreground" />
           </div>
@@ -466,7 +514,7 @@ const handleUserAdded = async (userData) => {
           <div class="flex items-center justify-between">
             <div class="space-y-2">
               <p class="text-sm text-muted-foreground">Clocked In</p>
-              <p class="text-2xl">87</p>
+              <p class="text-2xl">{{ summary.clockedIn }}</p>
             </div>
             <Clock class="h-8 w-8 text-muted-foreground" />
           </div>
@@ -477,7 +525,7 @@ const handleUserAdded = async (userData) => {
           <div class="flex items-center justify-between">
             <div class="space-y-2">
               <p class="text-sm text-muted-foreground">Avg Hours/Week</p>
-              <p class="text-2xl">41.2</p>
+              <p class="text-2xl">{{ summary.avgHoursWeek }}</p>
             </div>
             <TrendingUp class="h-8 w-8 text-muted-foreground" />
           </div>
@@ -488,7 +536,7 @@ const handleUserAdded = async (userData) => {
           <div class="flex items-center justify-between">
             <div class="space-y-2">
               <p class="text-sm text-muted-foreground">Alerts</p>
-              <p class="text-2xl">3</p>
+              <p class="text-2xl">{{ summary.alertsCount }}</p>
             </div>
             <AlertTriangle class="h-8 w-8 text-muted-foreground" />
           </div>
@@ -510,22 +558,22 @@ const handleUserAdded = async (userData) => {
           <div class="flex items-center gap-4 p-3 bg-muted/50 rounded-lg">
             <div class="h-2 w-2 bg-green-500 rounded-full"></div>
             <div class="flex-1">
-              <p class="text-sm">John Smith clocked in</p>
-              <p class="text-xs text-muted-foreground">Production - 8:45 AM</p>
+              <p class="text-sm">{{ recentActivity[0]?.user }} {{ recentActivity[0]?.action || recentActivity[0]?.action }}</p>
+              <p class="text-xs text-muted-foreground">{{ recentActivity[0]?.details }} • {{ recentActivity[0]?.time }}</p>
             </div>
           </div>
           <div class="flex items-center gap-4 p-3 bg-muted/50 rounded-lg">
             <div class="h-2 w-2 bg-blue-500 rounded-full"></div>
             <div class="flex-1">
-              <p class="text-sm">Sarah Johnson submitted timesheet</p>
-              <p class="text-xs text-muted-foreground">Field Service - 8:30 AM</p>
+              <p class="text-sm">{{ recentActivity[1]?.user }} {{ recentActivity[1]?.action || recentActivity[1]?.action }}</p>
+              <p class="text-xs text-muted-foreground">{{ recentActivity[1]?.details }} • {{ recentActivity[1]?.time }}</p>
             </div>
           </div>
           <div class="flex items-center gap-4 p-3 bg-muted/50 rounded-lg">
             <div class="h-2 w-2 bg-yellow-500 rounded-full"></div>
             <div class="flex-1">
-              <p class="text-sm">Mike Chen - Late clock in</p>
-              <p class="text-xs text-muted-foreground">Quality Control - 9:15 AM</p>
+              <p class="text-sm">{{ recentActivity[2]?.user }} {{ recentActivity[2]?.action || recentActivity[2]?.action }}</p>
+              <p class="text-xs text-muted-foreground">{{ recentActivity[2]?.details }} • {{ recentActivity[2]?.time }}</p>
             </div>
           </div>
         </div>
@@ -535,7 +583,6 @@ const handleUserAdded = async (userData) => {
     <AddEditEmployeeDialog :employee="editingEmployee" :open="isAddEditOpen" @update:open="isAddEditOpen = $event" @save="handleSaveEmployee" />
     <GenerateReportDialog :open="isReportOpen" @update:open="isReportOpen = $event" reportType="hr" />
     <ExportDataDialog :open="isExportOpen" @update:open="isExportOpen = $event" dataType="admin" />
-    <AddUserDialog :open="isAddUserOpen" @update:open="isAddUserOpen = $event" @save="handleUserAdded" />
     <WorkWeekSettingsDialog :open="isWorkWeekOpen" @update:open="isWorkWeekOpen = $event" @save="(settings) => { console.log('Work week settings saved:', settings); toast.success('Work week settings updated successfully!'); }" />
   </div>
 </template>

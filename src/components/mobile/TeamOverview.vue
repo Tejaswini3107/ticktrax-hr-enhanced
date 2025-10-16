@@ -41,36 +41,71 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
-import { onMounted } from 'vue';
+import { ref, onMounted } from 'vue';
+import toast from '../../utils/toast.js';
 import Card from '../ui/card.vue';
 import { CardContent } from '../ui/card-components.vue';
 import Button from '../ui/button.vue';
+import apiService from '../../services/apiService.js';
+import authManager from '../../services/authService.js';
 
-const teamHours = ref('320');
-const onDuty = ref(5);
+const teamHours = ref(0);
+const onDuty = ref(0);
+const members = ref([]);
+const isLoading = ref(false);
 
-const members = ref([
-  { id: 1, name: 'Alice Johnson', role: 'Employee', initials: 'AJ' },
-  { id: 2, name: 'Bob Smith', role: 'Employee', initials: 'BS' },
-  { id: 3, name: 'Carol Lee', role: 'Manager', initials: 'CL' }
-]);
+const loadTeam = async () => {
+  try {
+    isLoading.value = true;
+    const cur = await authManager.getCurrentUser();
+    if (!cur.success) throw new Error('Not signed in');
+
+    const users = await apiService.listUsers();
+    const uarr = Array.isArray(users) ? users : [];
+    const mems = [];
+    let totalHours = 0;
+    let dutyCount = 0;
+
+    for (const u of uarr.slice(0, 50)) {
+      const uid = u.id || u.attributes?.id;
+      mems.push({ id: uid, name: u.attributes?.first_name ? `${u.attributes.first_name} ${u.attributes.last_name}` : (u.name || u.email || 'Unknown'), role: u.role || u.attributes?.role || 'Employee', initials: (u.attributes?.first_name || u.name || 'U').slice(0,1).toUpperCase() });
+      try {
+        const times = await apiService.getUserWorkingTimes(uid);
+        const hours = (Array.isArray(times) ? times : []).reduce((acc, t) => acc + (Number(t.duration_hours || t.hours || 0) || 0), 0);
+        totalHours += hours;
+        // If they have a recent active clock record, count as on-duty
+        const active = (Array.isArray(times) ? times : []).some(t => t.status === 'running' || t.status === 'in_progress');
+        if (active) dutyCount += 1;
+      } catch (e) {
+        console.warn('loadTeam: failed fetching times for', uid, e);
+      }
+    }
+
+    members.value = mems.slice(0, 50);
+    teamHours.value = Math.round(totalHours);
+    onDuty.value = dutyCount;
+  } catch (err) {
+    console.warn('loadTeam failed', err);
+    toast.error('Unable to load team data');
+  } finally {
+    isLoading.value = false;
+  }
+};
 
 const viewProfile = (m) => {
-  alert(`Viewing profile for ${m.name} (demo)`);
+  toast.info(`Viewing profile: ${m.name}`);
 };
 
 const message = (m) => {
-  alert(`Opening chat with ${m.name} (demo)`);
+  toast.info(`Opening chat with ${m.name}`);
 };
 
-const refresh = () => {
-  alert('Refreshing team data (demo)');
+const refresh = async () => {
+  toast.info('Refreshing team data...');
+  await loadTeam();
 };
 
-onMounted(() => {
-  console.debug('[TeamOverview] mounted');
-});
+onMounted(loadTeam);
 </script>
 
 <style scoped>

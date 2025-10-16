@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
+import { toast } from 'vue-sonner';
+import apiService from '../../services/apiService.js';
 import { Dialog, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "../ui/dialog.vue";
 import DialogContent from "../ui/dialog-template.vue";
 import Button from "../ui/button.vue";
@@ -10,15 +12,12 @@ import { UserPlus, Loader2 } from "lucide-vue-next";
 type Employee = {
   id: string;
   name: string;
-  department: string;
   role: string;
   status: string;
   hoursThisWeek: number;
-  type: string;
   email?: string;
   phone?: string;
-  location?: string;
-  hireDate?: string;
+  // simplified: no type/location
 };
 
 const props = defineProps<{
@@ -29,41 +28,142 @@ const props = defineProps<{
 const emit = defineEmits(['update:open', 'save']);
 
 const isSubmitting = ref(false);
+const isLoadingUser = ref(false);
 const formData = ref({
-  name: '',
+  first_name: '',
+  last_name: '',
   email: '',
   phone: '',
-  department: '',
   role: 'employee',
-  type: 'Regular',
-  location: '',
-  hireDate: '',
+  // simplified: no type/location
 });
 
+// When the parent provides an employee with an id, fetch the authoritative record
+// from the API to ensure we edit the latest server data. Otherwise fall back to
+// the provided employee object (or empty form for add).
+const ROLE_MAP = { 1: 'employee', 2: 'manager', 3: 'admin' };
+const normalizeRole = (val) => {
+  if (val == null) return 'employee';
+  // numeric ids
+  if (typeof val === 'number') return ROLE_MAP[val] || 'employee';
+  if (typeof val === 'string') {
+    const s = val.trim();
+    const n = Number(s);
+    if (!Number.isNaN(n)) return ROLE_MAP[n] || 'employee';
+    // Normalize string roles case-insensitively
+    const lower = s.toLowerCase();
+    if (lower === 'admin' || lower === 'administrator') return 'admin';
+    if (lower === 'manager' || lower === 'lead') return 'manager';
+    if (lower === 'employee' || lower === 'staff' || lower === 'user') return 'employee';
+    // If it's already one of our canonical keys, return it
+    if (['admin', 'manager', 'employee'].includes(lower)) return lower;
+    // Fallback: return original string to avoid losing data, but prefer employee
+    return lower;
+  }
+  return 'employee';
+};
+
+const loadUser = async (userId) => {
+  isLoadingUser.value = true;
+  try {
+    const res = await apiService.getUserById(userId);
+    const src = Array.isArray(res) ? res[0] : (res?.data || res?.user || res || {});
+    // map common shapes to our form fields
+    const first = src.first_name || src.attributes?.first_name || '';
+    const last = src.last_name || src.attributes?.last_name || '';
+    const email = src.personal_email || src.email || src.attributes?.personal_email || src.attributes?.email || '';
+    const phone = src.phone_number || src.phone || src.attributes?.phone || '';
+  const rawRole = src.role || src.attributes?.role || src.role_id || src.attributes?.role_id || 'employee';
+  const role = normalizeRole(rawRole);
+    formData.value = {
+      first_name: first,
+      last_name: last,
+      email: email,
+      phone: phone,
+      role: role,
+    };
+  } catch (err) {
+    console.warn('Failed to load user for edit', err);
+    toast.error('Failed to load user data from server.');
+    // fall back to provided props.employee where possible
+    const src = props.employee || {};
+    const parts = String(src.name || '').trim().split(/\s+/);
+    formData.value = {
+      first_name: src.first_name || parts.shift() || '',
+      last_name: src.last_name || parts.join(' ') || '',
+      email: src.email || src.personal_email || '',
+      phone: src.phone || '',
+      role: normalizeRole(src.role || src.role_id || src.attributes?.role || src.attributes?.role_id || 'employee'),
+    };
+  } finally {
+    isLoadingUser.value = false;
+  }
+};
+
 watch(() => props.employee, (newEmployee) => {
-  formData.value = {
-    name: newEmployee?.name || "",
-    email: newEmployee?.email || "",
-    phone: newEmployee?.phone || "",
-    department: newEmployee?.department || "",
-    role: newEmployee?.role || "employee",
-    type: newEmployee?.type || "Regular",
-    location: newEmployee?.location || "",
-    hireDate: newEmployee?.hireDate || "",
-  };
+  if (newEmployee && (newEmployee.id || newEmployee.user_id)) {
+    // Use server data when editing an existing user
+    const id = newEmployee.id || newEmployee.user_id;
+    loadUser(id);
+  } else {
+    // New user or missing id — use provided object or reset
+    const src = newEmployee || {};
+    let first = '';
+    let last = '';
+    if (src.first_name || src.last_name) {
+      first = src.first_name || '';
+      last = src.last_name || '';
+    } else if (src.name) {
+      const parts = String(src.name).trim().split(/\s+/);
+      first = parts.shift() || '';
+      last = parts.join(' ') || '';
+    }
+    formData.value = {
+      first_name: first,
+      last_name: last,
+      email: src.email || src.personal_email || "",
+      phone: src.phone || "",
+      role: normalizeRole(src.role || src.role_id || src.attributes?.role || src.attributes?.role_id || 'employee'),
+    };
+  }
 }, { immediate: true });
 
 const handleSubmit = async () => {
   isSubmitting.value = true;
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-  emit('save', {
-    ...formData.value,
-    id: props.employee?.id || `EMP${Math.floor(Math.random() * 1000).toString().padStart(3, "0")}`,
-    status: props.employee?.status || "active",
-    hoursThisWeek: props.employee?.hoursThisWeek || 0,
-  });
-  isSubmitting.value = false;
-  emit('update:open', false);
+  try {
+    // Build payload in the required API shape
+    const payload = {
+      first_name: (formData.value.first_name || '').toString(),
+      last_name: (formData.value.last_name || '').toString(),
+      personal_email: formData.value.email || '',
+      role_id: typeof formData.value.role === 'number' ? formData.value.role : (formData.value.role === 'manager' ? 2 : (formData.value.role === 'admin' ? 3 : 1)),
+      phone_number: formData.value.phone || ''
+    };
+
+    let res;
+    if (props.employee && (props.employee.id)) {
+      // update existing user
+      res = await apiService.updateUser(props.employee.id, payload);
+      toast.success('User updated successfully');
+    } else {
+      // create new user
+      res = await apiService.createUser(payload);
+      toast.success('User created successfully');
+    }
+
+    // Normalize server response
+    const created = Array.isArray(res) ? res[0] : (res?.data || res?.user || res || {});
+
+    // Emit the created/updated user to parent so lists update
+    emit('save', created);
+  } catch (err) {
+    console.error('Failed creating/updating user from AddEditEmployeeDialog', err);
+    const msg = err?.response?.message || err?.message || 'Failed to save user';
+    toast.error(String(msg));
+  } finally {
+    isSubmitting.value = false;
+    emit('update:open', false);
+  }
 };
 </script>
 
@@ -82,25 +182,27 @@ const handleSubmit = async () => {
 
       <form @submit.prevent="handleSubmit" class="space-y-6">
         <div class="space-y-4">
-          <h4>Personal Information</h4>
+          <div class="flex items-center justify-between">
+            <h4>Personal Information</h4>
+          </div>
           <div class="grid grid-cols-2 gap-4">
             <div class="space-y-2">
-              <Label for="name">Full Name *</Label>
-              <Input id="name" placeholder="John Doe" v-model="formData.name" required />
+              <Label for="firstName">First Name *</Label>
+              <Input id="firstName" placeholder="First name" v-model="formData.first_name" required />
             </div>
             <div class="space-y-2">
-              <Label for="email">Email Address *</Label>
-              <Input id="email" type="email" placeholder="john.doe@company.com" v-model="formData.email" required />
+              <Label for="lastName">Last Name *</Label>
+              <Input id="lastName" placeholder="Last name" v-model="formData.last_name" required />
             </div>
           </div>
           <div class="grid grid-cols-2 gap-4">
             <div class="space-y-2">
-              <Label for="phone">Phone Number</Label>
-              <Input id="phone" type="tel" placeholder="(555) 123-4567" v-model="formData.phone" />
+              <Label for="email">Email Address *</Label>
+              <Input id="email" type="email" placeholder="john.doe@company.com" v-model="formData.email" required />
             </div>
             <div class="space-y-2">
-              <Label for="hireDate">Hire Date</Label>
-              <Input id="hireDate" type="date" v-model="formData.hireDate" />
+              <Label for="phone">Phone Number</Label>
+              <Input id="phone" type="tel" placeholder="(555) 123-4567" v-model="formData.phone" />
             </div>
           </div>
         </div>
@@ -108,18 +210,6 @@ const handleSubmit = async () => {
         <div class="space-y-4">
           <h4>Employment Details</h4>
           <div class="grid grid-cols-2 gap-4">
-            <div class="space-y-2">
-              <Label for="department">Department *</Label>
-              <select id="department" class="w-full px-3 py-2 bg-input-background border border-border rounded-lg" v-model="formData.department" required>
-                <option value="">Select Department</option>
-                <option value="Production">Production</option>
-                <option value="Warehouse">Warehouse</option>
-                <option value="Field Service">Field Service</option>
-                <option value="Quality Control">Quality Control</option>
-                <option value="HR">HR</option>
-                <option value="Administration">Administration</option>
-              </select>
-            </div>
             <div class="space-y-2">
               <Label for="role">Role *</Label>
               <select id="role" class="w-full px-3 py-2 bg-input-background border border-border rounded-lg" v-model="formData.role" required>
@@ -129,30 +219,16 @@ const handleSubmit = async () => {
               </select>
             </div>
           </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div class="space-y-2">
-              <Label for="type">Employee Type *</Label>
-              <select id="type" class="w-full px-3 py-2 bg-input-background border border-border rounded-lg" v-model="formData.type" required>
-                <option value="Regular">Regular</option>
-                <option value="Field Worker">Field Worker</option>
-                <option value="Warehouse">Warehouse</option>
-              </select>
-            </div>
-            <div class="space-y-2">
-              <Label for="location">Work Location</Label>
-              <Input id="location" placeholder="Main Office" v-model="formData.location" />
-            </div>
-          </div>
         </div>
 
         <DialogFooter>
           <Button type="button" variant="outline" @click="$emit('update:open', false)" :disabled="isSubmitting">
             Cancel
           </Button>
-          <Button type="submit" :disabled="isSubmitting">
-            <template v-if="isSubmitting">
+          <Button type="submit" :disabled="isSubmitting || isLoadingUser">
+            <template v-if="isSubmitting || isLoadingUser">
               <Loader2 class="h-4 w-4 mr-2 animate-spin" />
-              {{ employee ? "Updating..." : "Adding..." }}
+              {{ isLoadingUser ? 'Loading...' : (employee ? 'Updating...' : 'Adding...') }}
             </template>
             <template v-else>
               {{ employee ? "Update Employee" : "Add Employee" }}

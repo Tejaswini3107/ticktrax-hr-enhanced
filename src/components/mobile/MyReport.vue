@@ -31,6 +31,7 @@
 
 <script setup>
 import { ref } from 'vue';
+import toast from '../../utils/toast.js';
 import Card from '../ui/card.vue';
 import { CardContent } from '../ui/card-components.vue';
 import Button from '../ui/button.vue';
@@ -43,7 +44,8 @@ const notes = ref([
 ]);
 
 const exportReport = () => {
-  alert('Export started (demo)');
+  // TODO: integrate with report export endpoint
+  toast.info('Export started');
 };
 </script>
 
