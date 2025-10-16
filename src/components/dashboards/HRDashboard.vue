@@ -8,8 +8,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs.vue';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table.vue';
 import HRReports from '../hr/HRReports.vue';
 import EmployeeManagement from '../hr/EmployeeManagement.vue';
-import Timesheets from '../hr/Timesheets.vue';
-import Policies from '../hr/Policies.vue';
 import HelpCenter from '../hr/HelpCenter.vue';
 import { 
   Users, 
@@ -181,14 +179,22 @@ const employees = [
       <EmployeeManagement />
     </div>
 
-    <!-- Timesheets View -->
-    <div v-else-if="currentView === 'timesheets'">
-      <Timesheets />
-    </div>
-
-    <!-- Policies View -->
-    <div v-else-if="currentView === 'policies'">
-      <Policies />
+    <!-- Approvals View -->
+    <div v-else-if="currentView === 'approvals'">
+      <div class="p-6 space-y-6">
+        <div>
+          <h2 class="text-2xl font-bold">HR Approvals</h2>
+          <p class="text-muted-foreground mt-1">Review and approve employee requests</p>
+        </div>
+        <Card>
+          <CardContent class="pt-6">
+            <div class="text-center py-12 text-muted-foreground">
+              <FileText class="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p>Approvals interface coming soon</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
 
     <!-- Reports View -->
@@ -215,6 +221,24 @@ const employees = [
         
         <!-- HR Reports Component -->
         <HRReports />
+      </div>
+    </div>
+
+    <!-- HR Settings View -->
+    <div v-else-if="currentView === 'settings'">
+      <div class="p-6 space-y-6">
+        <div>
+          <h2 class="text-2xl font-bold">HR Settings</h2>
+          <p class="text-muted-foreground mt-1">Configure HR policies and system settings</p>
+        </div>
+        <Card>
+          <CardContent class="pt-6">
+            <div class="text-center py-12 text-muted-foreground">
+              <Settings class="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p>HR Settings interface coming soon</p>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
 

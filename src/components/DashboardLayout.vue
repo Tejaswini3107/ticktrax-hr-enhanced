@@ -51,24 +51,10 @@ const roleConfig = {
     menuItems: [
       { icon: Home, label: "Dashboard", id: "dashboard", priority: "high" },
       { icon: Users, label: "Employee Management", id: "employees", priority: "high" },
-      { icon: FileText, label: "Recruitment", id: "recruitment", priority: "high" },
-      { icon: TrendingUp, label: "Performance", id: "performance", priority: "medium" },
-      { icon: Calendar, label: "Payroll", id: "payroll", priority: "medium" },
-      { icon: Shield, label: "HR Reports", id: "reports", priority: "medium" },
+      { icon: FileText, label: "Approvals", id: "approvals", priority: "high" },
+      { icon: TrendingUp, label: "HR Reports", id: "reports", priority: "medium" },
       { icon: Settings, label: "HR Settings", id: "settings", priority: "low" },
       { icon: HelpCircle, label: "Help Center", id: "help", priority: "low" },
-    ],
-  },
-  hr: {
-    title: "HR Portal",
-    icon: Users,
-    menuItems: [
-      { icon: Home, label: "Dashboard", id: "dashboard" },
-      { icon: Users, label: "Employee Management", id: "employees" },
-      { icon: FileText, label: "Approvals", id: "approvals" },
-      { icon: TrendingUp, label: "HR Reports", id: "reports" },
-      { icon: Settings, label: "HR Settings", id: "settings" },
-      { icon: HelpCircle, label: "Help Center", id: "help" },
     ],
   },
   admin: {
