@@ -97,8 +97,17 @@ jspm_packages/
 # TernJS port file
 .tern-port
 
-# Mobile app related files and directories
-mobile/
+# Mobile build artifacts (keep source files)
+mobile/platforms/
+mobile/plugins/
+mobile/hooks/
+mobile/merges/
+mobile/platforms.json
+mobile/node_modules/
+mobile/www/assets/
+mobile/www/index.html
+
+# Mobile build outputs
 *.apk
 *.aab
 *.ipa
@@ -106,33 +115,11 @@ mobile/
 *.dSYM.zip
 *.dSYM
 
-# Cordova/PhoneGap specific
-platforms/
-plugins/
-hooks/
-merges/
-platforms.json
-cordova/
-config.xml
-package-lock.json
-
-# Mobile build outputs
-www/
-build/
-mobile/www/
-mobile/build/
-
 # Android specific
-*.apk
-*.aab
-*.keystore
 android/
 android.json
 
 # iOS specific
-*.ipa
-*.dSYM.zip
-*.dSYM
 ios/
 ios.json
 Podfile
@@ -142,11 +129,14 @@ pods.json
 *.xcodeproj/
 *.xcworkspace/
 
-# Mobile development files
-mobile/.gitignore
-mobile/config.xml
-mobile/package-lock.json
-mobile/package.json
+# Keep mobile source files
+!mobile/config.xml
+!mobile/package.json
+!mobile/www/index.html
+!mobile/www/manifest.json
+!mobile/www/sw.js
+!mobile/www/icons/
+!mobile/www/favicon.svg
 
 # Temporary files
 *.tmp

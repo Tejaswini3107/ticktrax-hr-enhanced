@@ -1,0 +1,105 @@
+<?xml version='1.0' encoding='utf-8'?>
+<widget id="com.ticktrax.hr" version="1.0.0" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
+    <name>TickTrax HR</name>
+    <description>
+        TickTrax HR - Time Tracking and Employee Management Mobile App
+    </description>
+    <author email="support@ticktrax.com" href="https://ticktrax.com">
+        TickTrax Team
+    </author>
+    <content src="index.html" />
+    <access origin="*" />
+    <allow-intent href="http://*/*" />
+    <allow-intent href="https://*/*" />
+    <allow-intent href="tel:*" />
+    <allow-intent href="sms:*" />
+    <allow-intent href="mailto:*" />
+    <allow-intent href="geo:*" />
+    <platform name="android">
+        <allow-intent href="market:*" />
+    </platform>
+    <platform name="ios">
+        <allow-intent href="itms:*" />
+        <allow-intent href="itms-apps:*" />
+    </platform>
+    <preference name="DisallowOverscroll" value="true" />
+    <preference name="android-minSdkVersion" value="22" />
+    <preference name="BackupWebStorage" value="none" />
+    <preference name="SplashMaintainAspectRatio" value="true" />
+    <preference name="FadeSplashScreenDuration" value="300" />
+    <preference name="SplashShowOnlyFirstTime" value="false" />
+    <preference name="SplashScreen" value="screen" />
+    <preference name="SplashScreenDelay" value="3000" />
+    <preference name="AutoHideSplashScreen" value="true" />
+    <preference name="ShowSplashScreenSpinner" value="false" />
+    <preference name="StatusBarOverlaysWebView" value="false" />
+    <preference name="StatusBarBackgroundColor" value="#1e40af" />
+    <preference name="StatusBarStyle" value="lightcontent" />
+    <preference name="Orientation" value="portrait" />
+    <preference name="Fullscreen" value="false" />
+    <preference name="KeepRunning" value="true" />
+    <preference name="LoadUrlTimeoutValue" value="700000" />
+    <preference name="InAppBrowserStorageEnabled" value="true" />
+    <preference name="KeyboardDisplayRequiresUserAction" value="false" />
+    <preference name="SuppressesLongPressGesture" value="false" />
+    <preference name="SuppressesIncrementalRendering" value="false" />
+    <preference name="UIWebViewBounce" value="false" />
+    <preference name="DisallowOverscroll" value="true" />
+    <preference name="EnableViewportScale" value="true" />
+    <preference name="MediaPlaybackRequiresUserAction" value="false" />
+    <preference name="AllowInlineMediaPlayback" value="true" />
+    <preference name="MediaPlaybackAllowsAirPlay" value="true" />
+    <preference name="WKSuspendInBackground" value="false" />
+    <preference name="WKAppBoundDomains" value="ticktrax.com" />
+    <preference name="CordovaWebViewEngine" value="CDVWKWebView" />
+    <feature name="StatusBar">
+        <param name="ios-package" value="CDVStatusBar" onload="true" />
+    </feature>
+    <feature name="SplashScreen">
+        <param name="ios-package" value="CDVSplashScreen" onload="true" />
+    </feature>
+    <feature name="Device">
+        <param name="ios-package" value="CDVDevice" onload="true" />
+    </feature>
+    <feature name="Geolocation">
+        <param name="ios-package" value="CDVLocation" onload="true" />
+    </feature>
+    <feature name="Camera">
+        <param name="ios-package" value="CDVCamera" onload="true" />
+    </feature>
+    <feature name="NetworkInformation">
+        <param name="ios-package" value="CDVConnection" onload="true" />
+    </feature>
+    <feature name="Whitelist">
+        <param name="ios-package" value="CDVWhitelist" onload="true" />
+    </feature>
+    <platform name="ios">
+        <icon src="res/ios/icon.png" width="57" height="57" />
+        <icon src="res/ios/icon@2x.png" width="114" height="114" />
+        <icon src="res/ios/icon-40.png" width="40" height="40" />
+        <icon src="res/ios/icon-40@2x.png" width="80" height="80" />
+        <icon src="res/ios/icon-50.png" width="50" height="50" />
+        <icon src="res/ios/icon-50@2x.png" width="100" height="100" />
+        <icon src="res/ios/icon-60.png" width="60" height="60" />
+        <icon src="res/ios/icon-60@2x.png" width="120" height="120" />
+        <icon src="res/ios/icon-60@3x.png" width="180" height="180" />
+        <icon src="res/ios/icon-72.png" width="72" height="72" />
+        <icon src="res/ios/icon-72@2x.png" width="144" height="144" />
+        <icon src="res/ios/icon-76.png" width="76" height="76" />
+        <icon src="res/ios/icon-76@2x.png" width="152" height="152" />
+        <icon src="res/ios/icon-83.5@2x.png" width="167" height="167" />
+        <icon src="res/ios/icon-small.png" width="29" height="29" />
+        <icon src="res/ios/icon-small@2x.png" width="58" height="58" />
+        <icon src="res/ios/icon-small@3x.png" width="87" height="87" />
+        <splash src="res/ios/Default.png" width="320" height="480" />
+        <splash src="res/ios/Default@2x.png" width="640" height="960" />
+        <splash src="res/ios/Default-568h@2x.png" width="640" height="1136" />
+        <splash src="res/ios/Default-667h.png" width="750" height="1334" />
+        <splash src="res/ios/Default-736h.png" width="1242" height="2208" />
+        <splash src="res/ios/Default-Landscape-736h.png" width="2208" height="1242" />
+        <splash src="res/ios/Default-Landscape@2x.png" width="2048" height="1536" />
+        <splash src="res/ios/Default-Landscape.png" width="1024" height="768" />
+        <splash src="res/ios/Default-Portrait@2x.png" width="1536" height="2048" />
+        <splash src="res/ios/Default-Portrait.png" width="768" height="1024" />
+    </platform>
+</widget>
