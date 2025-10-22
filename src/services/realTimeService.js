@@ -1,5 +1,5 @@
 import { API_CONFIG } from '../config/api.js'
-import { getMobileApiConfig, isCordovaApp } from '../config/mobile.js'
+// Mobile config removed for web-only build
 import authManager from './authService.js'
 import apiService from './apiService.js'
 
@@ -47,8 +47,8 @@ class RealTimeService {
       }
 
       // Connect to Phoenix Socket with token
-      // Use mobile-specific WebSocket URL if in Cordova
-      const wsBaseUrl = isCordovaApp() ? getMobileApiConfig().WS_URL : API_CONFIG.WS_URL
+      // Use standard WebSocket URL
+      const wsBaseUrl = API_CONFIG.WS_URL
       const wsUrl = `${wsBaseUrl}?token=${encodeURIComponent(authToken)}`
       this.socket = new WebSocket(wsUrl)
 
