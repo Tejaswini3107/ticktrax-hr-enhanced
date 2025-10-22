@@ -14,10 +14,22 @@ self.addEventListener('install', (event) => {
     caches.open(CACHE_NAME)
       .then((cache) => {
         console.log('Service Worker: Caching files');
-        return cache.addAll(urlsToCache);
+        // Cache files individually to handle failures gracefully
+        return Promise.allSettled(
+          urlsToCache.map(url => 
+            cache.add(url).catch(err => {
+              console.warn(`Failed to cache ${url}:`, err);
+              return null;
+            })
+          )
+        );
       })
       .then(() => {
-        console.log('Service Worker: Cached all files');
+        console.log('Service Worker: Cached files (some may have failed)');
+        return self.skipWaiting();
+      })
+      .catch(err => {
+        console.error('Service Worker: Cache installation failed:', err);
         return self.skipWaiting();
       })
   );
@@ -45,6 +57,11 @@ self.addEventListener('activate', (event) => {
 
 // Fetch event - serve cached content when offline
 self.addEventListener('fetch', (event) => {
+  // Skip non-GET requests and API calls
+  if (event.request.method !== 'GET' || event.request.url.includes('/api/')) {
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request)
       .then((response) => {
@@ -56,28 +73,41 @@ self.addEventListener('fetch', (event) => {
         // Clone the request
         const fetchRequest = event.request.clone();
 
-        return fetch(fetchRequest).then((response) => {
-          // Check if valid response
-          if (!response || response.status !== 200 || response.type !== 'basic') {
+        return fetch(fetchRequest)
+          .then((response) => {
+            // Check if valid response
+            if (!response || response.status !== 200 || response.type !== 'basic') {
+              return response;
+            }
+
+            // Clone the response
+            const responseToCache = response.clone();
+
+            // Cache successful responses
+            caches.open(CACHE_NAME)
+              .then((cache) => {
+                cache.put(event.request, responseToCache).catch(err => {
+                  console.warn('Failed to cache response:', err);
+                });
+              })
+              .catch(err => {
+                console.warn('Failed to open cache:', err);
+              });
+
             return response;
-          }
-
-          // Clone the response
-          const responseToCache = response.clone();
-
-          caches.open(CACHE_NAME)
-            .then((cache) => {
-              // Don't cache API requests in this simple version
-              if (!event.request.url.includes('/api/')) {
-                cache.put(event.request, responseToCache);
-              }
-            });
-
-          return response;
-        }).catch(() => {
-          // Network failed, try to serve from cache
-          return caches.match('/');
-        });
+          })
+          .catch((error) => {
+            console.warn('Network request failed:', error);
+            // Network failed, try to serve index.html for SPA routing
+            if (event.request.url.includes('/') && !event.request.url.includes('.')) {
+              return caches.match('/index.html');
+            }
+            return new Response('Network error', { status: 503 });
+          });
+      })
+      .catch((error) => {
+        console.warn('Cache match failed:', error);
+        return new Response('Cache error', { status: 503 });
       })
   );
 });
