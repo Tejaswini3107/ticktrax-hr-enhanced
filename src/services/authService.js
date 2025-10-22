@@ -21,10 +21,12 @@ class AuthTokenManager {
         result = await apiService.signIn(credentials);
         authMethod = 'sign_in';
       } catch (error) {
+        console.log('🔐 API sign_in failed, falling back to mock service:', error.message);
         // API sign_in failed, trying mock service fallback
         try {
           result = await mockApiService.login(credentials);
           authMethod = 'mock';
+          console.log('✅ Mock authentication successful');
         } catch (mockError) {
           console.error('🔐 AuthService: Mock service also failed:', mockError.message);
           throw error; // Throw original API error

@@ -129,18 +129,16 @@ const loadDashboard = async () => {
       return;
     }
 
-    // Load dashboard analytics using new API
-    const analyticsData = await apiService.getDashboardAnalytics({
-      start_date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days ago
-      end_date: new Date().toISOString().split('T')[0] // today
-    });
+    // Load dashboard data using available APIs
+    const [timeEntries, clockStatus] = await Promise.all([
+      apiService.getTimeEntries({
+        start_date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days ago
+        end_date: new Date().toISOString().split('T')[0] // today
+      }),
+      apiService.getClockStatus()
+    ]);
 
-    // Load recent time entries
-    const timeEntries = await apiService.getTimeEntries({
-      start_date: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 7 days ago
-      end_date: new Date().toISOString().split('T')[0], // today
-      limit: 10
-    });
+    // Use the timeEntries from the previous call
 
     // Update recent entries
     if (timeEntries && timeEntries.data) {
