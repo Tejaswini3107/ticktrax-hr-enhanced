@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
 import { ThemeProvider } from './components/ThemeProvider.vue';
-import MobileAppWrapper from './components/mobile/MobileAppWrapper.vue';
+// Mobile wrapper removed for web-only build
 import LoginScreen from './components/auth/LoginScreen.vue';
 import DashboardLayout from './components/DashboardLayout.vue';
 import EmployeeDashboard from './components/dashboards/EmployeeDashboard.vue';
@@ -11,7 +11,7 @@ import ProfileDialog from './components/dialogs/ProfileDialog.vue';
 import Toaster from './components/ui/sonner.vue';
 import { toast } from 'vue-sonner';
 import authManager from './services/authService.js';
-import mobileService from './services/mobileService.js';
+// Mobile service removed for web-only build
 // import './utils/apiTest.js'; // Auto-test API connection - disabled to prevent startup API calls
 
 const user = ref(null);
@@ -27,25 +27,7 @@ watch(user, (newUser, oldUser) => {
   // User state tracking
 }, { immediate: true, deep: true });
 const isProfileOpen = ref(false);
-const isMobileApp = ref(false);
-
-// Detect if we should use mobile layout
-onMounted(() => {
-  detectMobileEnvironment();
-  
-  // Listen for orientation changes
-  window.addEventListener('orientationchange', detectMobileEnvironment);
-  window.addEventListener('resize', detectMobileEnvironment);
-});
-
-const detectMobileEnvironment = () => {
-  const width = window.innerWidth;
-  const userAgent = navigator.userAgent;
-  
-  // Detect mobile based on screen width and user agent
-  isMobileApp.value = width <= 768 || 
-    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
-};
+// Mobile detection removed for web-only build
 
 const handleLogin = (name, role) => {
   user.value = { name, role };
@@ -128,18 +110,8 @@ onMounted(async () => {
 
 <template>
   <ThemeProvider>
-    <!-- Mobile App Layout -->
-    <MobileAppWrapper v-if="isMobileApp">
-      <component
-        :is="dashboardContent"
-        :currentView="currentView"
-        @update:currentView="currentView = $event"
-        :currentRole="user?.role"
-      />
-    </MobileAppWrapper>
-
-    <!-- Desktop Layout -->
-    <div v-else>
+    <!-- Web Layout Only -->
+    <div>
       <div v-if="!user">
         <LoginScreen @login="handleLogin" />
       </div>

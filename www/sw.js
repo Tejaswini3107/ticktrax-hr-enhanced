@@ -2,11 +2,9 @@ const CACHE_NAME = 'ticktrax-v1';
 const urlsToCache = [
   '/',
   '/index.html',
-  '/src/main.js',
-  '/src/App.vue',
-  '/src/index.css',
   '/manifest.json',
-  // Add other static assets
+  '/favicon.svg',
+  // Icons will be cached dynamically
 ];
 
 // Install event - cache resources

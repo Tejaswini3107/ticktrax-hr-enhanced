@@ -1,7 +1,7 @@
 import { createApp } from 'vue';
 import App from './App.vue';
 import './index.css';
-import './styles/mobile.css';
+// Mobile CSS removed for web-only build
 
 import apiService from './services/apiService.js';
 import authManager from './services/authService.js';
