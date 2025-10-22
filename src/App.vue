@@ -7,7 +7,6 @@ import DashboardLayout from './components/DashboardLayout.vue';
 import EmployeeDashboard from './components/dashboards/EmployeeDashboard.vue';
 import ManagerDashboard from './components/dashboards/ManagerDashboard.vue';
 import AdminDashboard from './components/dashboards/AdminDashboard.vue';
-import HRDashboard from './components/dashboards/HRDashboard.vue';
 import ProfileDialog from './components/dialogs/ProfileDialog.vue';
 import Toaster from './components/ui/sonner.vue';
 import { toast } from 'vue-sonner';
@@ -84,8 +83,6 @@ const dashboardContent = computed(() => {
       return EmployeeDashboard;
     case "manager":
       return ManagerDashboard;
-    case "hr":
-      return HRDashboard;
     case "admin":
       return AdminDashboard;
     default:

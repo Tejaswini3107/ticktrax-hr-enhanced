@@ -199,11 +199,9 @@ export default {
       try {
         // Only initialize if user is authenticated
         if (!authManager.isAuthenticated()) {
-          console.log('🚀 User not authenticated, skipping real-time initialization')
           return
         }
 
-        console.log('🚀 Initializing real-time features...')
         
         // Connect to WebSocket
         await realTimeService.connect()
@@ -214,16 +212,13 @@ export default {
         
         // Join time tracking channel
         await realTimeService.joinTimeTracking(user.id)
-        console.log('✅ Joined time tracking channel')
         
         // Join notifications channel  
         await realTimeService.joinNotifications(user.id)
-        console.log('✅ Joined notifications channel')
         
         // Join team dashboard if user has team
         if (user.team_id) {
           await realTimeService.joinTeamDashboard(user.team_id)
-          console.log('✅ Joined team dashboard channel')
         }
         
         // Set up event listeners
@@ -248,24 +243,20 @@ export default {
       // Connection events
       realTimeService.on('connected', () => {
         isConnected.value = true
-        console.log('🔴 Real-time connection established')
       })
       
       realTimeService.on('disconnected', () => {
         isConnected.value = false
-        console.log('🔴 Real-time connection lost')
       })
       
       // Time tracking events
       realTimeService.on('clock_in', (data) => {
-        console.log('🕐 Real-time clock in:', data)
         activeEntry.value = data
         addActivity('clock_in', `Clocked in at ${formatTime(data.started_at)}`)
         toast.success('⏰ Clocked in successfully')
       })
       
       realTimeService.on('clock_out', (data) => {
-        console.log('🕐 Real-time clock out:', data)
         activeEntry.value = null
         const duration = calculateDuration(data.started_at, data.ended_at)
         addActivity('clock_out', `Clocked out after ${duration}`)
@@ -273,7 +264,6 @@ export default {
       })
       
       realTimeService.on('time_entry_updated', (data) => {
-        console.log('🕐 Time entry updated:', data)
         if (data.active) {
           activeEntry.value = data
         }
@@ -281,30 +271,25 @@ export default {
       
       // Team events
       realTimeService.on('team_member_online', (data) => {
-        console.log('👥 Team member online:', data)
         updateTeamMemberStatus(data.user_id, { online: true })
         addActivity('team_online', `${data.name} came online`)
       })
       
       realTimeService.on('team_member_offline', (data) => {
-        console.log('👥 Team member offline:', data)
         updateTeamMemberStatus(data.user_id, { online: false, working: false })
         addActivity('team_offline', `${data.name} went offline`)
       })
       
       realTimeService.on('team_stats_updated', (data) => {
-        console.log('📊 Team stats updated:', data)
         // Update team statistics in real-time
       })
       
       // Notification events
       realTimeService.on('notification', (data) => {
-        console.log('🔔 Real-time notification:', data)
         addNotification(data)
       })
       
       realTimeService.on('alert', (data) => {
-        console.log('🚨 Real-time alert:', data)
         addNotification({ ...data, type: 'alert' })
         toast.warning(data.message)
       })
@@ -318,7 +303,6 @@ export default {
     async function clockIn() {
       try {
         isProcessing.value = true
-        console.log('⏰ Clocking in with real-time...')
         
         // Get location if available
         let location = null
@@ -378,7 +362,6 @@ export default {
     async function clockOut() {
       try {
         isProcessing.value = true
-        console.log('⏰ Clocking out with real-time...')
         
         // Get location if available
         let location = null
@@ -623,7 +606,6 @@ export default {
     // ==================== LIFECYCLE ====================
     
     onMounted(() => {
-      console.log('🚀 Real-time clock widget mounted')
       
       // Start time updates
       updateTime()
@@ -637,7 +619,6 @@ export default {
     })
     
     onUnmounted(() => {
-      console.log('🛑 Real-time clock widget unmounted')
       
       // Clear intervals
       if (timeInterval) clearInterval(timeInterval)

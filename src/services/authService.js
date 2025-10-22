@@ -67,7 +67,6 @@ class AuthTokenManager {
             const roleMapping = {
               1: 'admin',
               2: 'manager', 
-              3: 'hr',
               4: 'employee'
             };
             role = roleMapping[attributes.role_id] || 'employee';

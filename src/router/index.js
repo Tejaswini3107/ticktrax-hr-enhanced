@@ -8,15 +8,7 @@ import DashboardLayout from '../components/DashboardLayout.vue'
 import EmployeeDashboard from '../components/dashboards/EmployeeDashboard.vue'
 import ManagerDashboard from '../components/dashboards/ManagerDashboard.vue'
 import AdminDashboard from '../components/dashboards/AdminDashboard.vue'
-import HRDashboard from '../components/dashboards/HRDashboard.vue'
 import ProfileDialog from '../components/dialogs/ProfileDialog.vue'
-
-// Import HR side pages
-import EmployeeManagement from '../components/hr/EmployeeManagement.vue'
-import Recruitment from '../components/hr/Recruitment.vue'
-import PerformanceManagement from '../components/hr/PerformanceManagement.vue'
-import PayrollManagement from '../components/hr/PayrollManagement.vue'
-import HRReports from '../components/hr/HRReports.vue'
 
 // Define routes with authentication requirements
 const routes = [
@@ -104,60 +96,6 @@ const routes = [
           requiresRole: ['admin']
         }
       },
-      {
-        path: 'hr',
-        name: 'HRDashboard',
-        component: HRDashboard,
-        meta: { 
-          requiresAuth: true,
-          requiresRole: ['hr', 'admin']
-        }
-      },
-      {
-        path: 'hr/employees',
-        name: 'HREmployeeManagement',
-        component: EmployeeManagement,
-        meta: { 
-          requiresAuth: true,
-          requiresRole: ['hr', 'admin']
-        }
-      },
-      {
-        path: 'hr/recruitment',
-        name: 'HRRecruitment',
-        component: Recruitment,
-        meta: { 
-          requiresAuth: true,
-          requiresRole: ['hr', 'admin']
-        }
-      },
-      {
-        path: 'hr/performance',
-        name: 'HRPerformanceManagement',
-        component: PerformanceManagement,
-        meta: { 
-          requiresAuth: true,
-          requiresRole: ['hr', 'admin']
-        }
-      },
-      {
-        path: 'hr/payroll',
-        name: 'HRPayrollManagement',
-        component: PayrollManagement,
-        meta: { 
-          requiresAuth: true,
-          requiresRole: ['hr', 'admin']
-        }
-      },
-      {
-        path: 'hr/reports',
-        name: 'HRReports',
-        component: HRReports,
-        meta: { 
-          requiresAuth: true,
-          requiresRole: ['hr', 'admin']
-        }
-      }
     ]
   },
   {
@@ -205,7 +143,6 @@ const router = createRouter({
 
 // Global navigation guards - CRITICAL SECURITY IMPLEMENTATION
 router.beforeEach(async (to, from, next) => {
-  console.log('🔐 Router beforeEach: Navigating from', from.path, 'to', to.path)
   
   // Set document title
   if (to.meta.title) {
@@ -214,14 +151,12 @@ router.beforeEach(async (to, from, next) => {
 
   // Check if route requires authentication
   if (to.meta.requiresAuth) {
-    console.log('🔐 Route requires authentication, checking...')
     
     try {
       // Check if user is authenticated
       const isAuthenticated = await authManager.isAuthenticated()
       
       if (!isAuthenticated) {
-        console.log('🔐 User not authenticated, redirecting to login')
         // Redirect to login with return URL
         next({
           path: '/login',
@@ -234,7 +169,6 @@ router.beforeEach(async (to, from, next) => {
       const currentUser = await authManager.getCurrentUser()
       
       if (!currentUser || !currentUser.success) {
-        console.log('🔐 Failed to get user info, redirecting to login')
         next('/login')
         return
       }
@@ -247,13 +181,11 @@ router.beforeEach(async (to, from, next) => {
           : [to.meta.requiresRole]
         
         if (!requiredRoles.includes(userRole)) {
-          console.log('🔐 Insufficient permissions. User role:', userRole, 'Required:', requiredRoles)
           next('/unauthorized')
           return
         }
       }
 
-      console.log('✅ Authentication and authorization passed')
       next()
       
     } catch (error) {
@@ -273,7 +205,6 @@ router.beforeEach(async (to, from, next) => {
         }
       } catch (error) {
         // Continue to login if auth check fails
-        console.log('Auth check failed for login route, continuing...')
       }
     }
     
@@ -281,10 +212,8 @@ router.beforeEach(async (to, from, next) => {
   }
 })
 
-// After navigation guard - for logging and analytics
+// After navigation guard - for analytics
 router.afterEach((to, from) => {
-  console.log('📊 Navigation completed:', from.path, '->', to.path)
-  
   // Track page views (could integrate with analytics)
   if (window.gtag) {
     window.gtag('config', 'GA_MEASUREMENT_ID', {

@@ -14,8 +14,7 @@ export const mockApiService = {
     const email = credentials.email;
     const name = email.split('@')[0].replace(/[_\.\-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     const role = email.includes('admin') ? 'admin' : 
-                 email.includes('manager') ? 'manager' : 
-                 email.includes('hr') ? 'hr' : 'employee';
+                 email.includes('manager') ? 'manager' : 'employee';
     
     // Mock API role detection
     

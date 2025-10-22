@@ -44,19 +44,6 @@ const roleConfig = {
       { icon: HelpCircle, label: "Help Center", id: "help", priority: "low" },
     ],
   },
-  hr: {
-    title: "HR Portal",
-    icon: Users,
-    color: "purple",
-    menuItems: [
-      { icon: Home, label: "Dashboard", id: "dashboard", priority: "high" },
-      { icon: Users, label: "Employee Management", id: "employees", priority: "high" },
-      { icon: FileText, label: "Approvals", id: "approvals", priority: "high" },
-      { icon: TrendingUp, label: "HR Reports", id: "reports", priority: "medium" },
-      { icon: Settings, label: "HR Settings", id: "settings", priority: "low" },
-      { icon: HelpCircle, label: "Help Center", id: "help", priority: "low" },
-    ],
-  },
   admin: {
     title: "Admin Portal",
     icon: Shield,
