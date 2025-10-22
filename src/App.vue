@@ -131,7 +131,14 @@ onMounted(async () => {
             :currentView="currentView"
             @update:currentView="currentView = $event"
             :currentRole="user.role"
+            v-if="dashboardContent"
           />
+          <div v-else class="flex items-center justify-center h-full">
+            <div class="text-center">
+              <h2 class="text-xl font-semibold mb-2">Loading Dashboard...</h2>
+              <p class="text-muted-foreground">Please wait while we load your dashboard.</p>
+            </div>
+          </div>
         </DashboardLayout>
       </div>
     </div>

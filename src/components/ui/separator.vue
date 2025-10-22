@@ -17,23 +17,12 @@ const delegatedProps = computed(() => {
 })
 </script>
 
-<template>
-  <RadixSeparator
-    v-bind="delegatedProps"
-    :class="cn(
-      'shrink-0 bg-border',
-      props.orientation === 'horizontal' ? 'h-px w-full' : 'h-full w-px',
-      props.class,
-    )"
-  />
-</template>
-
 <script>
-import { computed, h } from 'vue'
+import { computed } from 'vue'
 import { Separator as RadixSeparator } from 'radix-vue'
 import { cn } from './utils'
 
-// Export Separator as named export
+// Export Separator as named export for compatibility
 export const Separator = {
   name: 'Separator',
   props: {
@@ -49,14 +38,25 @@ export const Separator = {
       return delegated
     });
     
-    return () => h(RadixSeparator, {
+    return () => RadixSeparator({
       ...delegatedProps.value,
       class: cn(
         'shrink-0 bg-border',
         props.orientation === 'horizontal' ? 'h-px w-full' : 'h-full w-px',
         props.class,
       )
-    }, slots.default());
+    }, slots.default?.());
   }
 };
 </script>
+
+<template>
+  <RadixSeparator
+    v-bind="delegatedProps"
+    :class="cn(
+      'shrink-0 bg-border',
+      props.orientation === 'horizontal' ? 'h-px w-full' : 'h-full w-px',
+      props.class,
+    )"
+  />
+</template>
